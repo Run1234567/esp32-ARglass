@@ -1,0 +1,17 @@
+# 过滤 ESP32 端的巨大编译缓存
+ARGLASS_IDF/.pio/
+ARGLASS_IDF/build/
+ARGLASS_IDF/sdkconfig
+ARGLASS_IDF/sdkconfig.old
+
+# 过滤服务器端的 Python 缓存
+Server-side/__pycache__/
+Server-side/*.py[cod]
+
+Server-side/ffmpeg.exe
+Server-side/ffprobe.exe
+# 过滤通用的开发环境废料
+.vscode/
+*.bin
+*.elf
+*.o
