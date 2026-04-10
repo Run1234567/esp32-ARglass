@@ -4,6 +4,12 @@ ARGLASS_IDF/build/
 ARGLASS_IDF/sdkconfig
 ARGLASS_IDF/sdkconfig.old
 
+# 过滤 ESP32 端的巨大编译缓存
+esp32_LVGL/.pio/
+esp32_LVGL/build/
+esp32_LVGL/sdkconfig
+esp32_LVGL/sdkconfig.old
+
 # 过滤服务器端的 Python 缓存
 Server-side/__pycache__/
 Server-side/*.py[cod]
