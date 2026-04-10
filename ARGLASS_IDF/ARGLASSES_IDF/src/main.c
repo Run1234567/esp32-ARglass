@@ -12,13 +12,14 @@
 #include "audio_app.h"
 #include "speaker_app.h"
 #include "esp_camera.h"
+#include "sd_card_app.h" // ? 加上这句！引入 SD 卡模块
 
 static const char *TAG = "J.A.R.V.I.S";
 
 // ==========================================
 // ?? 您的专属配置 ??
 // ==========================================
-const char* websocket_url = "ws://192.168.95.156:8765/"; 
+const char* websocket_url = "ws://124.220.224.189:8765/";
 
 // ==========================================
 // ? 全局状态与句柄
@@ -110,10 +111,8 @@ void audio_tx_task(void *pvParameters) {
     }
 }
 
-// ==========================================
-// ? 主启动程序
-// ==========================================
 void app_main(void) {
+
     // 1. 初始化 NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -124,10 +123,12 @@ void app_main(void) {
 
     ESP_LOGI(TAG, "System booting...");
 
+    
+    // ==========================================
+
     // 2. 初始化网络与三大硬件
     wifi_init_sta();
     
-    // 给 WiFi 5 秒钟时间连上路由器 (重要！)
     ESP_LOGI(TAG, "? 等待 WiFi 分配 IP...");
     vTaskDelay(pdMS_TO_TICKS(5000)); 
 

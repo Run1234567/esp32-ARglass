@@ -4,12 +4,11 @@ import wave
 import os
 import time
 import numpy as np
-import pygame
 import base64    # 用于图片加密处理
 import glob      # 用于查找最新的一张照片
 import re        # 用于过滤（微笑）这种表情词汇
 from faster_whisper import WhisperModel
-from openai import OpenAI
+from openai import OpenAI, AsyncOpenAI  # 💡 增加异步客户端
 import pyttsx3   # 用于离线语音
 from pydub import AudioSegment # 💡 新增：用于音频解码
 import edge_tts  # 💡 引入库
@@ -25,17 +24,17 @@ if not os.path.exists("received"):
 # 屏蔽 Hugging Face 烦人的软链接警告
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1" 
 
-pygame.mixer.init()
 
 # 💡 定义本地 Python 路径，用于语音播报子进程隔离
-python_path = "C:/Users/20461/AppData/Local/Programs/Python/Python311/python.exe"
-AudioSegment.converter = os.path.join(os.getcwd(), "ffmpeg.exe")
-AudioSegment.ffprobe   = os.path.join(os.getcwd(), "ffprobe.exe")
+# Linux 下直接调用系统环境变量即可
+python_path = "python3"
+AudioSegment.converter = "ffmpeg"
+AudioSegment.ffprobe   = "ffprobe"
 # =========================================
 # 🧠 AI 双脑、语音模型与全局状态初始化
 # =========================================
-print("⏳ 正在加载 Whisper 语音识别模型 (small)...")
-model = WhisperModel("small", device="cuda", compute_type="float16")
+print("⏳ 正在加载 Whisper 语音识别模型 (tiny)...")
+model = WhisperModel("base", device="cpu", compute_type="int8")
 print("✅ 语音识别模型加载完毕！")
 
 # 1. 聊天主脑 (DeepSeek)
@@ -50,8 +49,14 @@ VISION_CLIENT = OpenAI(
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
 )
 
+# 💡 新增：流式专用的异步主脑
+ASYNC_AI_CLIENT = AsyncOpenAI(
+    api_key="sk-fb636ddd5e504d509a38f8978434bdeb",
+    base_url="https://api.deepseek.com"
+)
+
 chat_history = [
-    {"role": "system", "content": "你是一个戴在用户头上的智能AR眼镜助手贾维斯。回答必须极其口语化、简明扼要，控制在50字内，绝不使用任何括号或表情符号。如果用户要求翻译（无论是中译英还是英译中），请直接输出翻译结果，不需要说“好的，翻译结果是”这类废话。"}
+    {"role": "system", "content": "你是一个戴在用户头上的智能AR眼镜助手贾维斯。回答必须极其口语化、简明扼要，控制在50字内，绝不使用任何括号或表情符号。可能包含同音字、错别字或断句错误（如把'贾维斯'识别成'假卫士'）。如果用户要求翻译（无论是中译英还是英译中），请直接输出翻译结果，不需要说“好的，翻译结果是”这类废话。"}
 ]
 
 is_translation_mode = False 
@@ -80,7 +85,10 @@ def encode_image(image_path):
 
 def ask_ai_to_look(image_path, user_question):
     print(f"\n👁️ [视觉副脑正在查看照片...]")
-    system_prompt = "你是贾维斯，一个AR眼镜助手。请极其简短地口语化回答用户的提问，字数控制在50字以内，不要加任何表情或括号。"
+    system_prompt = "你是戴在用户头上的AR眼镜助手贾维斯。注意：用户的提问来自实时语音识别，"
+    "可能包含同音字、错别字或断句错误（如把'贾维斯'识别成'假卫士'）。"
+    "请务必结合上下文自动纠错，理解用户的真实意图并给出回答。"
+    "回答必须极其口语化、简明扼要，控制在50字以内，绝不使用任何括号或表情符号。"
     try:
         base64_image = encode_image(image_path)
         response = VISION_CLIENT.chat.completions.create(
@@ -101,6 +109,112 @@ def ask_ai_to_look(image_path, user_question):
         return reply
     except Exception as e:
         return f"我的眼睛好像进沙子了，错误信息是：{e}"
+
+async def speak_sentence(text, websocket):
+    """
+    轻量级 TTS 函数：优先极速 Edge-TTS，若微软服务器被墙，瞬间切换本地离线语音
+    """
+    safe_text = re.sub(r'[（\(【\[].*?[）\)】\]]', '', text).strip()
+    if not safe_text: return
+    
+    print(f"  🗣️ [秒回发声]: {safe_text}")
+    try:
+        # 🚀 尝试连接微软服务器
+        communicate = edge_tts.Communicate(safe_text, "zh-CN-XiaoxiaoNeural")
+        mp3_buffer = io.BytesIO()
+        
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                mp3_buffer.write(chunk["data"])
+                
+        mp3_buffer.seek(0)
+        audio = AudioSegment.from_file(mp3_buffer, format="mp3")
+        
+        # 💡 修改点1：强制设为单声道 (set_channels(1))，适配ESP32单喇叭
+        audio = audio.set_frame_rate(16000).set_sample_width(2).set_channels(1) 
+        raw_pcm_data = audio.raw_data
+        
+        # 💡 修改点2：精准控制下发速率（每次3200字节=0.1秒数据，延时0.09秒）
+        chunk_size = 3200
+        for i in range(0, len(raw_pcm_data), chunk_size):
+            await websocket.send(raw_pcm_data[i:i+chunk_size])
+            await asyncio.sleep(0.09) 
+            
+    except Exception as e:
+        # 🛡️ 微软服务器连不上，瞬间启用本地离线引擎兜底
+        print(f"  ⚠️ [微软接口被墙，光速切换本地离线]: {e}")
+        try:
+            def generate_offline():
+                engine = pyttsx3.init()
+                engine.setProperty('rate', 180) # 语速稍快
+                # 使用微妙级时间戳防冲突
+                temp_file = f"offline_reply_{int(time.time()*1000)}.wav"
+                engine.save_to_file(safe_text, temp_file)
+                engine.runAndWait()
+                return temp_file
+
+            temp_file = await asyncio.to_thread(generate_offline)
+            
+            audio = AudioSegment.from_file(temp_file)
+            # 💡 修改点3：离线语音也必须强制单声道
+            audio = audio.set_frame_rate(16000).set_sample_width(2).set_channels(1)
+            raw_pcm_data = audio.raw_data
+            
+            # 阅后即焚
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+                
+            # 💡 修改点4：离线语音也用同样的缓冲速率发包
+            chunk_size = 3200
+            for i in range(0, len(raw_pcm_data), chunk_size):
+                await websocket.send(raw_pcm_data[i:i+chunk_size])
+                await asyncio.sleep(0.09)
+                
+        except Exception as e2:
+            print(f"  ❌ 离线语音也彻底失败了: {e2}")
+async def process_and_speak_stream(user_text, websocket):
+    """
+    全链路流式大脑：边接收文字，边切分句子，边触发发声
+    """
+    print(f"\n🧠 [主脑流式思考中...]")
+    chat_history.append({"role": "user", "content": user_text})
+    
+    try:
+        response = await ASYNC_AI_CLIENT.chat.completions.create(
+            model="deepseek-chat",
+            messages=chat_history,
+            max_tokens=100,
+            stream=True # 💡 开启魔法开关
+        )
+        
+        sentence_buffer = ""
+        full_reply = ""
+        
+        # 遇到这些符号，说明一句话结束了，立刻送去语音合成！
+        punctuation = ['，', '。', '！', '？', ',', '.', '!', '?']
+        
+        async for chunk in response:
+            content = chunk.choices[0].delta.content
+            if content:
+                sentence_buffer += content
+                full_reply += content
+                
+                # 如果缓冲区里出现了标点符号
+                if any(punc in sentence_buffer for punc in punctuation):
+                    # 立刻把缓冲区的话拿去播放，不阻塞后续内容生成
+                    await speak_sentence(sentence_buffer, websocket)
+                    sentence_buffer = "" # 清空，准备接下一句
+        
+        # 结尾如果没有标点符号，把剩下的话播完
+        if sentence_buffer:
+            await speak_sentence(sentence_buffer, websocket)
+            
+        # 记录完整历史
+        chat_history.append({"role": "assistant", "content": full_reply})
+        print("✅ [主脑流式输出完毕]")
+        
+    except Exception as e:
+        print(f"主脑流式短路了：{e}")
 
 async def speak(text, websocket, loop):
     """
@@ -129,7 +243,9 @@ async def speak(text, websocket, loop):
         
         mp3_buffer.seek(0)
         audio = AudioSegment.from_file(mp3_buffer, format="mp3")
-        audio = audio.set_frame_rate(16000).set_sample_width(2).set_channels(2)
+        
+        # 💡 修改点5：单声道
+        audio = audio.set_frame_rate(16000).set_sample_width(2).set_channels(1)
         raw_pcm_data = audio.raw_data 
 
     # ====================================================
@@ -138,10 +254,9 @@ async def speak(text, websocket, loop):
     except Exception as e:
         print(f"⚠️ [在线网络受阻，瞬间启用本地离线引擎]: {e}")
         try:
-            # 为了不卡死主循环，我们把 pyttsx3 放到子线程跑
             def generate_offline():
                 engine = pyttsx3.init()
-                engine.setProperty('rate', 180) # 语速稍快点
+                engine.setProperty('rate', 180) 
                 temp_file = f"offline_reply_{int(time.time())}.wav"
                 engine.save_to_file(safe_text, temp_file)
                 engine.runAndWait()
@@ -149,12 +264,12 @@ async def speak(text, websocket, loop):
 
             temp_file = await asyncio.to_thread(generate_offline)
             
-            # 读取生成的离线音频，强制转成 ESP32 需要的 PCM 格式
             audio = AudioSegment.from_file(temp_file)
-            audio = audio.set_frame_rate(16000).set_sample_width(2).set_channels(2)
+            
+            # 💡 修改点6：单声道
+            audio = audio.set_frame_rate(16000).set_sample_width(2).set_channels(1)
             raw_pcm_data = audio.raw_data
             
-            # 拿到数据后，阅后即焚，删掉临时文件
             if os.path.exists(temp_file):
                 os.remove(temp_file)
                 
@@ -165,17 +280,19 @@ async def speak(text, websocket, loop):
     # ====================================================
     # 📡 第三阶段：统一将处理好的波形数据切片下发给 ESP32
     # ====================================================
+   # 统一将处理好的波形数据切片下发给 ESP32
     if raw_pcm_data:
         total_bytes = len(raw_pcm_data)
-        print(f"📡 正在透传波形流... ({total_bytes} 字节)")
+        print(f"📡 正在极速透传波形流... ({total_bytes} 字节)")
 
+            # 💡 严格对齐 ESP32 的 websocket buffer_size (8192)
         chunk_size = 8192 
         for i in range(0, total_bytes, chunk_size):
             chunk = raw_pcm_data[i:i+chunk_size]
             await websocket.send(chunk)
-            await asyncio.sleep(0.09) 
-            
-        print("✅ 播报完毕")
+            # 🚨 删掉所有的 sleep！不人为干预，让服务器尽最快速度把这堆数据全塞进网络通道
+                
+        print("✅ 播报下发完毕")
 def transcribe_audio(file_path, websocket, loop):
     global is_translation_mode  
     
@@ -262,9 +379,15 @@ def transcribe_audio(file_path, websocket, loop):
             else:
                 reply = "贾维斯还没准备好画面，请再试一次。"
         else:
-            reply = ask_ai_brain(text)
+            # 💡 直接触发异步流式流水线，彻底抛弃死等的 ask_ai_brain
+            asyncio.run_coroutine_threadsafe(
+                process_and_speak_stream(text, websocket),
+                loop
+            )
+            return # 直接返回，因为声音播放已经在流水线里处理了
             
-        print(f"🤖 [眼镜回复]: {reply}\n")
+        # 注意：下面这两行只为视觉大模型保留（因为 Qwen-VL 目前没开流式）
+        print(f"🤖 [视觉脑回复]: {reply}\n")
         sync_speak(reply)
         
     except Exception as e:
