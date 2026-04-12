@@ -14,6 +14,57 @@ from pydub import AudioSegment # 💡 新增：用于音频解码
 import edge_tts  # 💡 引入库
 import io
 import pyttsx3 # 确保你顶部导入了它
+import paho.mqtt.client as mqtt # 💡 新增：导入 MQTT 库
+
+# =========================================
+# 📡 MQTT 极简连接测试
+# =========================================
+MQTT_BROKER = "127.0.0.1"  # 因为 Python 和 MQTT 都在云服务器上，直接填本机地址
+MQTT_PORT = 1883
+MQTT_USER = "RUN"          # 你刚才设置的账号
+MQTT_PASS = "88888888"     # 你刚才设置的密码
+
+# 定义一个回调函数：当连上时触发
+def on_mqtt_connect(client, userdata, flags, rc):
+    if rc == 0:
+        client.subscribe("home/status/#")
+        print("✅ [MQTT] 贾维斯主脑已成功接通本地 MQTT 枢纽！")
+    else:
+        print(f"❌ [MQTT] 糟糕，连接失败，状态码: {rc}")
+
+# =========================================
+# 📡 接收 MQTT 消息的回调函数
+# =========================================
+def on_mqtt_message(client, userdata, msg):
+    topic = msg.topic
+    payload = msg.payload.decode('utf-8')
+    print(f"📩 [MQTT 接收] 主题: {topic} | 内容: {payload}")
+    
+    # 💡 进阶玩法：如果收到传感器报警，可以直接触发 WebSocket 让眼镜发声！
+    # 比如：if topic == "home/alarm" and payload == "FIRE": ...
+
+
+
+# 1. 创建客户端
+mqtt_client = mqtt.Client()
+# 2. 装备账号密码
+mqtt_client.username_pw_set(MQTT_USER, MQTT_PASS)
+# 3. 绑定刚才写的回调函数
+mqtt_client.on_connect = on_mqtt_connect
+# 绑定消息接收回调
+mqtt_client.on_message = on_mqtt_message
+
+# 4. 尝试连接并挂在后台运行
+try:
+    mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
+    mqtt_client.loop_start() # 💡 loop_start 会在后台开个小线程保持连接，绝不会卡住你的 WebSocket
+except Exception as e:
+    print(f"⚠️ [MQTT] 启动报错了: {e}")
+
+# =========================================
+# ⚙️ 基础环境与目录初始化
+# =========================================
+
 #C:/Users/20461/AppData/Local/Programs/Python/Python311/python.exe -m pip install websockets 不要删
 # =========================================
 # ⚙️ 基础环境与目录初始化
