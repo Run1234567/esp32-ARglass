@@ -3,83 +3,117 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "tft_display.h"
-
-// ÒıÈë LVGL ºËĞÄÓëÒÆÖ²°ü
+#include "driver/i2c.h"
+#include "esp_websocket_client.h" // å¼•å…¥ WebSocket å®¢æˆ·ç«¯
+#include "nvs_flash.h"
+// å¼•å…¥ LVGL æ ¸å¿ƒä¸ç§»æ¤åŒ…
 #include "lvgl.h"
 #include "esp_lvgl_port.h"
+#include "math.h" // å¼•å…¥æ•°å­¦åº“ï¼Œåé¢ä¼šç”¨åˆ°æ­£å¼¦å‡½æ•°æ¥ç”Ÿæˆæµ‹è¯•éŸ³é¢‘æ•°æ®
+
+#include "MPU6050.h"
+#include "MAX30105.h"
+#include "my_wifi.h"
+#include "audio_driver.h"
+#include "app_mqtt.h"
+// ==========================================
+// ğŸŒ æœåŠ¡å™¨é…ç½® (è¯·æ”¹æˆä½ è¿è¡Œ Python è„šæœ¬çš„ç”µè„‘ IP)
+// ==========================================
+const char* websocket_url = "ws://124.220.224.189:8765/"; 
+esp_websocket_client_handle_t ws_client;
+LV_FONT_DECLARE(my_font_cn_16);
+
+#define SAMPLE_RATE 16000       // é‡‡æ ·ç‡å¿…é¡»å’Œ audio_driver.c é‡Œé…ç½®çš„ä¸€è‡´
+#define FREQUENCY 440.0         // æµ‹è¯•éŸ³é¢‘ç‡ 440Hz (æ ‡å‡†éŸ³A)
+#define AMPLITUDE 8000          // éŸ³é‡å¤§å° (16ä½PCMæœ€å¤§æ˜¯32767ï¼Œ8000æ˜¯ä¸€ä¸ªé€‚ä¸­ä¸”ä¸åˆºè€³çš„éŸ³é‡)
+#define BUFFER_SAMPLES 512      // æ¯æ¬¡è®¡ç®—/å‘é€çš„é‡‡æ ·ç‚¹æ•°
+
+// å®šä¹‰ä¸€ä¸ªåŒå£°é“éŸ³é¢‘ç¼“å†²åŒº (æ¯ä¸ªé‡‡æ ·ç‚¹16ä½ï¼Œå·¦å£°é“+å³å£°é“ï¼Œæ‰€ä»¥æ•°ç»„å¤§å°è¦ä¹˜ä»¥2)
+int16_t audio_buffer[BUFFER_SAMPLES * 2];
+
+// ç»Ÿä¸€çš„ I2C å¼•è„šå’Œå‚æ•°é…ç½®ï¼ˆæ ¹æ®ä½  MPU6050 é‡Œçš„è®¾ç½®æå–å‡ºæ¥ï¼‰
+#define I2C_MASTER_SCL_IO           1
+#define I2C_MASTER_SDA_IO           2
+#define I2C_MASTER_NUM              I2C_NUM_0
+#define I2C_MASTER_FREQ_HZ          400000
 
 static const char *TAG = "MAIN";
-
-// ==========================================
-// ? LVGL ¶¯»­»Øµ÷º¯Êı£ºÔÚ¶¯»­Ë¢ĞÂÊ±¸üĞÂÔ²»¡ºÍÎÄ×Ö
-// ==========================================
-static void arc_anim_cb(void * var, int32_t v) {
-    lv_obj_t * arc = (lv_obj_t *)var;
-    lv_arc_set_value(arc, v); // ¸üĞÂÔ²»¡µÄ½ø¶ÈÖµ
+// ----------------------------------------------------
+// å…¨å±€å”¯ä¸€çš„ I2C æ€»çº¿åˆå§‹åŒ–å‡½æ•°
+// ----------------------------------------------------
+static esp_err_t i2c_master_init(void) {
+    i2c_config_t conf = {
+        .mode = I2C_MODE_MASTER,
+        .sda_io_num = I2C_MASTER_SDA_IO,
+        .scl_io_num = I2C_MASTER_SCL_IO,
+        .sda_pullup_en = GPIO_PULLUP_ENABLE,
+        .scl_pullup_en = GPIO_PULLUP_ENABLE,
+        .master.clk_speed = I2C_MASTER_FREQ_HZ,
+    };
+    esp_err_t err = i2c_param_config(I2C_MASTER_NUM, &conf);
+    if (err != ESP_OK) return err;
     
-    // »ñÈ¡Ô²»¡ÄÚ²¿µÄ×Ó¶ÔÏó£¨Ò²¾ÍÊÇÎÒÃÇ´´½¨µÄÎÄ±¾±êÇ©£©£¬²¢¸üĞÂÏÔÊ¾µÄÊı×Ö
-    lv_obj_t * label = lv_obj_get_child(arc, 0); 
-    if (label) {
-        lv_label_set_text_fmt(label, "%d %%", (int)v);
+    return i2c_driver_install(I2C_MASTER_NUM, conf.mode, 0, 0, 0);
+}
+
+
+
+void read_max30105_task(void *pvParameters) {
+    uint32_t red_val, ir_val;
+    
+    while (1) {
+        if (max30105_read_fifo(I2C_MASTER_NUM, &red_val, &ir_val) == ESP_OK) {
+            // ä½¿ç”¨ printf è¾“å‡ºçº¯æ•°æ®ï¼Œæ ¼å¼ä¸º "çº¢å…‰,çº¢å¤–å…‰"
+            // è¿™ç§æ ¼å¼å¯ä»¥ç›´æ¥è¢« Arduino IDE æˆ–å…¶ä»–ä¸²å£ç»˜å›¾ä»ªè¯†åˆ«å¹¶ç”»å‡ºä¸¤æ¡æŠ˜çº¿
+            printf("%lu,%lu\n", red_val, ir_val);
+        }
+        
+        // ç»å¯¹å»¶æ—¶ 5ms (ç›¸å½“äº 200Hz çš„è¯»å–é¢‘ç‡)
+        vTaskDelay(pdMS_TO_TICKS(5)); 
     }
 }
 
 // ==========================================
-// ? ºËĞÄ UI ¹¹½¨º¯Êı
+// ğŸ“¡ WebSocket äº‹ä»¶å›è°ƒï¼šæ¥æ”¶éŸ³é¢‘å¹¶æ’­æ”¾
 // ==========================================
-void create_fancy_ui(void) {
-    // 1. ½«ÆÁÄ»±³¾°ÉèÎªÉîåäµÄ²ØÇàÉ« (Èü²©Åó¿Ë°µÉ«µ÷)
-    lv_obj_t * scr = lv_scr_act();
-    lv_obj_set_style_bg_color(scr, lv_color_hex(0x2a2a4c), 0);
-
-    // 2. ´´½¨Ò»¸öÔ²»¡¶ÔÏó (Arc)
-    lv_obj_t * arc = lv_arc_create(scr);
-    lv_obj_set_size(arc, 180, 180);       // Õ¼¾İ´ó²¿·ÖÆÁÄ»
-    lv_obj_center(arc);                   // ¾ø¶Ô¾ÓÖĞ
-    lv_arc_set_rotation(arc, 270);        // ÆğµãĞı×ªµ½¶¥²¿
-    lv_arc_set_bg_angles(arc, 0, 360);    // ±³¾°»­Ò»¸öÍêÕûµÄÔ²
-    lv_obj_remove_style(arc, NULL, LV_PART_KNOB); // È¥µôÍÏ×§ÓÃµÄ¡°Ğ¡ÊÖ±ú¡±£¬ÎÒÃÇÖ»×öÕ¹Ê¾
-
-    // --- ¿ªÊ¼·è¿ñ¶ÑµşÌØĞ§ ---
-    // ÉèÖÃÔ²»¡±³¾°¹ìµÀµÄÑÕÉ«ºÍ¿í¶È (°µÀ¶É«)
-    lv_obj_set_style_arc_color(arc, lv_color_hex(0x14143c), LV_PART_MAIN);
-    lv_obj_set_style_arc_width(arc, 15, LV_PART_MAIN);
+static void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data) {
+    esp_websocket_event_data_t *data = (esp_websocket_event_data_t *)event_data;
     
-    // ÉèÖÃ½ø¶ÈÌõµÄÑÕÉ«ºÍ¿í¶È (ÇàÀ¶É«)
-    lv_obj_set_style_arc_color(arc, lv_color_hex(0x00f0ff), LV_PART_INDICATOR);
-    lv_obj_set_style_arc_width(arc, 15, LV_PART_INDICATOR);
-    
-    // ? ×î»ªÀöµÄÒ»²½£º¸ø½ø¶ÈÌõ¼ÓÉÏ·¢¹âÍâ·¢¹âÒõÓ°£¡
-    lv_obj_set_style_shadow_color(arc, lv_color_hex(0x00f0ff), LV_PART_INDICATOR);
-    lv_obj_set_style_shadow_width(arc, 25, LV_PART_INDICATOR);
-    lv_obj_set_style_shadow_spread(arc, 5, LV_PART_INDICATOR);
-
-    // 3. ÔÚÔ²»¡ÕıÖĞ¼ä´´½¨Ò»¸ö°Ù·Ö±ÈÎÄ±¾±êÇ©
-    lv_obj_t * label = lv_label_create(arc); // ×¢Òâ£º¸¸¶ÔÏóÊÇ arc
-    lv_obj_center(label);
-    lv_obj_set_style_text_color(label, lv_color_white(), 0); // ´¿°×ÎÄ×Ö
-
-    // 4. ´´½¨Ò»¸ö LVGL ¶¯»­ (Animation)£¬ÈÃÔ²»¡×Ô¼º¶¯ÆğÀ´
-    lv_anim_t a;
-    lv_anim_init(&a);
-    lv_anim_set_var(&a, arc);                  // °ó¶¨¶¯»­¶ÔÏó£ºÎÒÃÇµÄÔ²»¡
-    lv_anim_set_exec_cb(&a, arc_anim_cb);      // °ó¶¨¸Õ²ÅĞ´µÄ¶¯»­»Øµ÷º¯Êı
-    lv_anim_set_time(&a, 2000);                // ¶¯»­Ê±³¤ 2 Ãë
-    lv_anim_set_playback_time(&a, 1000);       // ÍË»ØÊ±³¤ 1 Ãë (´ïµ½100%ºóµ¹ÍË»Ø0%)
-    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE); // ÎŞÏŞÑ­»·£¡
-    lv_anim_set_values(&a, 0, 100);            // ±äÁ¿·¶Î§£º´Ó 0 ±äµ½ 100
-    lv_anim_start(&a);                         // ¿ª»ú£¡
+    switch (event_id) {
+        case WEBSOCKET_EVENT_CONNECTED:
+            ESP_LOGI(TAG, "âœ… å·²è¿æ¥åˆ°åŸºç«™æœåŠ¡å™¨!");
+            break;
+        case WEBSOCKET_EVENT_DISCONNECTED:
+            ESP_LOGW(TAG, "âš ï¸ ä¸åŸºç«™æ–­å¼€è¿æ¥ï¼Œå°è¯•é‡è¿...");
+            break;
+        case WEBSOCKET_EVENT_DATA:
+            // op_code == 2 è¡¨ç¤ºæ”¶åˆ°çš„æ˜¯äºŒè¿›åˆ¶æµ (BIN)ï¼Œå³ Python å‘æ¥çš„ PCM éŸ³é¢‘æ•°æ®
+            if (data->op_code == 2 && data->data_len > 0) {
+                // æ ¸å¿ƒé­”æ³•ï¼šå°†æ”¶åˆ°çš„ç½‘ç»œéŸ³é¢‘å—ï¼Œç›´æ¥å¡ç»™ I2S é©±åŠ¨ç¼“å†²åŒºï¼
+                // I2S é©±åŠ¨å†…éƒ¨é…ç½®äº† portMAX_DELAYï¼Œå¦‚æœåº•å±‚æ’­æ”¾æ²¡æ’­å®Œï¼Œè¿™é‡Œä¼šè‡ªåŠ¨é˜»å¡ï¼Œå®Œç¾æ§åˆ¶ç½‘é€Ÿä¸æº¢å‡º
+                audio_driver_play(data->data_ptr, data->data_len);
+            }
+            break;
+    }
 }
 
 void app_main(void) {
-    ESP_LOGI(TAG, "1. Æô¶¯ÎïÀíÆÁÄ»Çı¶¯...");
+    // ğŸ’¡ 1. å¿…é¡»å…ˆåˆå§‹åŒ– NVSï¼Œå¦åˆ™ Wi-Fi å¿…å´©æºƒï¼
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+      ESP_ERROR_CHECK(nvs_flash_erase());
+      ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+
+    ESP_LOGI(TAG, "1. å¯åŠ¨ç‰©ç†å±å¹•é©±åŠ¨...");
     lcd_init();
 
-    ESP_LOGI(TAG, "2. ³õÊ¼»¯ LVGL ÒÆÖ²²ã...");
+    ESP_LOGI(TAG, "2. åˆå§‹åŒ– LVGL ç§»æ¤å±‚...");
     lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     lvgl_port_init(&lvgl_cfg);
 
-    ESP_LOGI(TAG, "3. ½«ÆÁÄ»¹ÒÔØµ½ LVGL...");
+    ESP_LOGI(TAG, "3. å°†å±å¹•æŒ‚è½½åˆ° LVGL...");
     lvgl_port_display_cfg_t disp_cfg = {
         .io_handle = io_handle,
         .panel_handle = panel_handle,
@@ -92,11 +126,65 @@ void app_main(void) {
     };
     lvgl_port_add_disp(&disp_cfg);
 
-    ESP_LOGI(TAG, "4. »æÖÆ»ªÀöµÄ UI...");
-    create_fancy_ui(); // µ÷ÓÃÎÒÃÇ¸Õ²ÅĞ´µÄ UI º¯Êı
+    ESP_LOGI(TAG, "4. ç»˜åˆ¶åä¸½çš„ UI...");
+    if (lvgl_port_lock(0)) {
+        
+        // åˆ›å»ºä¸€ä¸ªæ–‡æœ¬æ ‡ç­¾
+        lv_obj_t * label = lv_label_create(lv_scr_act());
+        
+        // åˆ›å»ºå¹¶åˆå§‹åŒ–æ ·å¼
+        static lv_style_t style_cn;
+        lv_style_init(&style_cn);
+        
+        // âœ¨ é­”æ³•åœ¨è¿™é‡Œï¼šæŠŠåˆšåˆšå£°æ˜çš„ä¸­æ–‡å­—åº“ç»‘å®šåˆ°æ ·å¼ä¸Šï¼
+        lv_style_set_text_font(&style_cn, &my_font_cn_16); 
+        lv_obj_add_style(label, &style_cn, 0);
+        
+        // è®¾ç½®ä¸­æ–‡æ–‡æœ¬å¹¶å±…ä¸­
+        lv_label_set_text(label, "J.A.R.V.I.S åˆ˜æ¢“æ¶¦çœŸå¸…");
+        lv_obj_center(label);
+        
+        // é‡Šæ”¾äº’æ–¥é”
+        lvgl_port_unlock();
+    }
+    // 5. åˆå§‹åŒ–ç¡¬ä»¶ I2C æ€»çº¿
+    ESP_ERROR_CHECK(i2c_master_init());
+    ESP_LOGI(TAG, "I2C ç¡¬ä»¶æ€»çº¿åˆå§‹åŒ–å®Œæ¯•ï¼");
 
-    ESP_LOGI(TAG, "Ö÷ÈÎÎñ½øÈëĞİÃß...");
+    // 6. è¿æ¥ Wi-Fi (ä¾èµ–å‰é¢çš„ NVS åˆå§‹åŒ–)
+    wifi_init_sta();
+
+    // 7. åˆå§‹åŒ–ä¼ æ„Ÿå™¨
+    if (mpu6050_init_all() == ESP_OK) {
+        ESP_LOGI(TAG, "MPU6050 å”¤é†’æˆåŠŸï¼");
+    }
+    if (max30105_init(I2C_MASTER_NUM) == ESP_OK) {
+        ESP_LOGI(TAG, "MAX30105 é…ç½®æˆåŠŸï¼");
+    }
+
+    // 8. åˆå§‹åŒ–éŸ³é¢‘é©±åŠ¨
+    if (audio_driver_init() != ESP_OK) {
+        printf("âŒ éŸ³é¢‘æ¨¡å—åˆå§‹åŒ–å¤±è´¥ï¼è¯·æ£€æŸ¥æ—¥å¿—ã€‚\n");
+        return;
+    }
+
+    // 9. é…ç½®å¹¶å¯åŠ¨ WebSocket å®¢æˆ·ç«¯
+    esp_websocket_client_config_t websocket_cfg = {
+        .uri = websocket_url,
+        .reconnect_timeout_ms = 5000, 
+    };
+    ws_client = esp_websocket_client_init(&websocket_cfg);
+    esp_websocket_register_events(ws_client, WEBSOCKET_EVENT_ANY, websocket_event_handler, (void *)ws_client);
+    esp_websocket_client_start(ws_client);
+    app_mqtt_start();
+    // 10. åˆ›å»ºä¼ æ„Ÿå™¨è¯»å–ä»»åŠ¡
+    // âš ï¸ æ³¨æ„ï¼šå‰ææ˜¯ä½ å·²ç»åœ¨å…¶ä»–æ–‡ä»¶å®ç°äº† read_mpu6050_taskï¼Œå¦åˆ™ç¼–è¯‘ä¼šæŠ¥æ‰¾ä¸åˆ°è¯¥å‡½æ•°
+    xTaskCreate(read_mpu6050_task, "read_mpu6050_task", 4096, NULL, 5, NULL);
+    xTaskCreate(read_max30105_task, "read_max30105_task", 4096, NULL, 6, NULL);
+    
+    // 11. ä¸»å¾ªç¯æŒ‚èµ·
     while (1) {
+        app_mqtt_publish("home/status/sensor", "TEMP:25C");
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }

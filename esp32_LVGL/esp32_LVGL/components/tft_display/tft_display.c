@@ -11,101 +11,101 @@
 
 static const char *TAG = "TFT_DISPLAY";
 
-// ==================== ÆÁÄ»Òı½ÅÓë²ÎÊıÅäÖÃ ====================
-// Çë¸ù¾İÄãµÄÊµ¼Ê½ÓÏßĞŞ¸ÄÕâÀïµÄÒı½ÅºÅ
+// ==================== å±å¹•å¼•è„šä¸å‚æ•°é…ç½® ====================
+// è¯·æ ¹æ®ä½ çš„å®é™…æ¥çº¿ä¿®æ”¹è¿™é‡Œçš„å¼•è„šå·
 #define LCD_HOST       SPI2_HOST
-#define PIN_NUM_SCLK   12  // SPI Ê±ÖÓÒı½Å
-#define PIN_NUM_MOSI   11  // SPI Êı¾İÒı½Å (SDA)
-#define PIN_NUM_MISO   -1  // ÆÁÄ»Í¨³£²»ĞèÒª MISO£¬ÉèÎª -1
-#define PIN_NUM_CS     10  // Æ¬Ñ¡Òı½Å
-#define PIN_NUM_DC     9   // Êı¾İ/ÃüÁî¿ØÖÆÒı½Å (RS/DC)
-#define PIN_NUM_RST    8   // ¸´Î»Òı½Å (RES)
+#define PIN_NUM_SCLK   12  // SPI æ—¶é’Ÿå¼•è„š
+#define PIN_NUM_MOSI   11  // SPI æ•°æ®å¼•è„š (SDA)
+#define PIN_NUM_MISO   -1  // å±å¹•é€šå¸¸ä¸éœ€è¦ MISOï¼Œè®¾ä¸º -1
+#define PIN_NUM_CS     10  // ç‰‡é€‰å¼•è„š
+#define PIN_NUM_DC     9   // æ•°æ®/å‘½ä»¤æ§åˆ¶å¼•è„š (RS/DC)
+#define PIN_NUM_RST    8   // å¤ä½å¼•è„š (RES)
 
-#define LCD_H_RES      240 // ÆÁÄ»Ë®Æ½·Ö±æÂÊ
-#define LCD_V_RES      240 // ÆÁÄ»´¹Ö±·Ö±æÂÊ
+#define LCD_H_RES      240 // å±å¹•æ°´å¹³åˆ†è¾¨ç‡
+#define LCD_V_RES      240 // å±å¹•å‚ç›´åˆ†è¾¨ç‡
 
 // ============================================================
-// ? È«¾Ö¾ä±ú£º¾ø¶Ô²»ÄÜ¼Ó static£¬ÒòÎª main.c ÀïµÄ LVGL ĞèÒªÄÃÈ¥ÓÃ£¡
+// ? å…¨å±€å¥æŸ„ï¼šç»å¯¹ä¸èƒ½åŠ  staticï¼Œå› ä¸º main.c é‡Œçš„ LVGL éœ€è¦æ‹¿å»ç”¨ï¼
 // ============================================================
 esp_lcd_panel_io_handle_t io_handle = NULL;
 esp_lcd_panel_handle_t panel_handle = NULL;
 
-// ³õÊ¼»¯ÆÁÄ»
+// åˆå§‹åŒ–å±å¹•
 void lcd_init(void)
 {
-    ESP_LOGI(TAG, "³õÊ¼»¯ SPI ×ÜÏß...");
+    ESP_LOGI(TAG, "åˆå§‹åŒ– SPI æ€»çº¿...");
     spi_bus_config_t buscfg = {
         .sclk_io_num = PIN_NUM_SCLK,
         .mosi_io_num = PIN_NUM_MOSI,
         .miso_io_num = PIN_NUM_MISO,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
-        .max_transfer_sz = LCD_H_RES * 80 * sizeof(uint16_t), // ´«Êä»º³åÇø´óĞ¡
+        .max_transfer_sz = LCD_H_RES * 80 * sizeof(uint16_t), // ä¼ è¾“ç¼“å†²åŒºå¤§å°
     };
-    // ³õÊ¼»¯ SPI2 
+    // åˆå§‹åŒ– SPI2 
     ESP_ERROR_CHECK(spi_bus_initialize(LCD_HOST, &buscfg, SPI_DMA_CH_AUTO));
 
-    ESP_LOGI(TAG, "ÅäÖÃ LCD µÄ SPI IO Ãæ°å...");
+    ESP_LOGI(TAG, "é…ç½® LCD çš„ SPI IO é¢æ¿...");
     esp_lcd_panel_io_spi_config_t io_config = {
         .dc_gpio_num = PIN_NUM_DC,
         .cs_gpio_num = PIN_NUM_CS,
-        .pclk_hz = 40 * 1000 * 1000,     // SPI Ê±ÖÓÆµÂÊ 40MHz
-        .spi_mode = 0,                   // SPI Ä£Ê½ 0
-        .lcd_cmd_bits = 8,               // ÆÁÄ»ÃüÁîÊÇ 8 bit
-        .lcd_param_bits = 8,             // ÆÁÄ»²ÎÊıÊÇ 8 bit
-        .trans_queue_depth = 10,         // SPI ´«Êä¶ÓÁĞÉî¶È
-        .on_color_trans_done = NULL,     // LVGL ÒÆÖ²°ü½Ó¹Üºó£¬²»ĞèÒªÎÒÃÇÊÖĞ´»Øµ÷
+        .pclk_hz = 40 * 1000 * 1000,     // SPI æ—¶é’Ÿé¢‘ç‡ 40MHz
+        .spi_mode = 0,                   // SPI æ¨¡å¼ 0
+        .lcd_cmd_bits = 8,               // å±å¹•å‘½ä»¤æ˜¯ 8 bit
+        .lcd_param_bits = 8,             // å±å¹•å‚æ•°æ˜¯ 8 bit
+        .trans_queue_depth = 10,         // SPI ä¼ è¾“é˜Ÿåˆ—æ·±åº¦
+        .on_color_trans_done = NULL,     // LVGL ç§»æ¤åŒ…æ¥ç®¡åï¼Œä¸éœ€è¦æˆ‘ä»¬æ‰‹å†™å›è°ƒ
         .user_ctx = NULL,
     };
-    // ½« IO ¾ä±ú¹ÒÔØµ½ SPI ×ÜÏß
+    // å°† IO å¥æŸ„æŒ‚è½½åˆ° SPI æ€»çº¿
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_HOST, &io_config, &io_handle));
 
-    ESP_LOGI(TAG, "°²×° ST7789 Çı¶¯²¢³õÊ¼»¯Ãæ°å...");
+    ESP_LOGI(TAG, "å®‰è£… ST7789 é©±åŠ¨å¹¶åˆå§‹åŒ–é¢æ¿...");
     esp_lcd_panel_dev_config_t panel_config = {
         .reset_gpio_num = PIN_NUM_RST,
-        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB, // ÏñËØÅÅ²¼Ë³Ğò£¬Èç¹ûÑÕÉ«µßµ¹¿ÉÒÔ¸Ä³É BGR
-        .bits_per_pixel = 16,                       // 16bit É«Éî (RGB565)
+        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB, // åƒç´ æ’å¸ƒé¡ºåºï¼Œå¦‚æœé¢œè‰²é¢ å€’å¯ä»¥æ”¹æˆ BGR
+        .bits_per_pixel = 16,                       // 16bit è‰²æ·± (RGB565)
     };
-    // ¸ù¾İ¾ßÌåĞ¾Æ¬ĞÍºÅ°²×°Çı¶¯£¨ÒÔ ST7789 ÎªÀı£¬Èç¹ûÄãµÄÆÁÄ»ÊÇÆäËûĞÍºÅ£¬ÇëÌæ»»ÕâÀïµÄº¯Êı£©
+    // æ ¹æ®å…·ä½“èŠ¯ç‰‡å‹å·å®‰è£…é©±åŠ¨ï¼ˆä»¥ ST7789 ä¸ºä¾‹ï¼Œå¦‚æœä½ çš„å±å¹•æ˜¯å…¶ä»–å‹å·ï¼Œè¯·æ›¿æ¢è¿™é‡Œçš„å‡½æ•°ï¼‰
     ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(io_handle, &panel_config, &panel_handle));
 
-    ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));    // ¸´Î»ÆÁÄ»
-    ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle));     // ³õÊ¼»¯ÆÁÄ»Ö¸Áî
+    ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));    // å¤ä½å±å¹•
+    ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle));     // åˆå§‹åŒ–å±å¹•æŒ‡ä»¤
 
-    // ºÜ¶à IPS ÆÁÄ»ĞèÒª¿ªÆôÑÕÉ«·´×ª£¬Èç¹ûÄãµÄÆÁÄ»ÏÔÊ¾ÑÕÉ«ÊÇ·´µÄ£¨±ÈÈçºÚÉ«±ä°×É«£©£¬Çë×¢ÊÍµô»ò¿ªÆôÕâĞĞ
+    // å¾ˆå¤š IPS å±å¹•éœ€è¦å¼€å¯é¢œè‰²åè½¬ï¼Œå¦‚æœä½ çš„å±å¹•æ˜¾ç¤ºé¢œè‰²æ˜¯åçš„ï¼ˆæ¯”å¦‚é»‘è‰²å˜ç™½è‰²ï¼‰ï¼Œè¯·æ³¨é‡Šæ‰æˆ–å¼€å¯è¿™è¡Œ
     ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel_handle, true)); 
 
-    // Èç¹ûÆÁÄ»ÏÔÊ¾»­Ãæ·´ÁË£¬¿ÉÒÔÈ¡Ïû×¢ÊÍÏÂÃæÕâÁ½ĞĞÀ´Ğı×ªÆÁÄ»
-    // ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_handle, true, false)); // ¾µÏñ·­×ª
-    // ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel_handle, true));       // ½»»» xy Öá
+    // å¦‚æœå±å¹•æ˜¾ç¤ºç”»é¢åäº†ï¼Œå¯ä»¥å–æ¶ˆæ³¨é‡Šä¸‹é¢è¿™ä¸¤è¡Œæ¥æ—‹è½¬å±å¹•
+    // ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_handle, true, false)); // é•œåƒç¿»è½¬
+    // ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel_handle, true));       // äº¤æ¢ xy è½´
 
-    ESP_LOGI(TAG, "¿ªÆôÆÁÄ»ÏÔÊ¾...");
+    ESP_LOGI(TAG, "å¼€å¯å±å¹•æ˜¾ç¤º...");
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
 }
 
-// »æÖÆ´¿É«¿é£¨Ö÷ÒªÓÃÓÚÇ°ÆÚ²âÊÔ£¬LVGL ½Ó¹ÜºóÕâ¸öº¯Êı»ù±¾ÓÃ²»ÉÏÁË£©
+// ç»˜åˆ¶çº¯è‰²å—ï¼ˆä¸»è¦ç”¨äºå‰æœŸæµ‹è¯•ï¼ŒLVGL æ¥ç®¡åè¿™ä¸ªå‡½æ•°åŸºæœ¬ç”¨ä¸ä¸Šäº†ï¼‰
 void lcd_draw_color_block(int x_start, int y_start, int x_end, int y_end, uint16_t color)
 {
     int width = x_end - x_start;
     int height = y_end - y_start;
     int pixels = width * height;
 
-    // ¶¯Ì¬·ÖÅäÑÕÉ«»º³åÇø
+    // åŠ¨æ€åˆ†é…é¢œè‰²ç¼“å†²åŒº
     uint16_t *buffer = (uint16_t *)heap_caps_malloc(pixels * sizeof(uint16_t), MALLOC_CAP_DMA);
     if (buffer == NULL) {
-        ESP_LOGE(TAG, "ÄÚ´æ²»×ã£¬ÎŞ·¨·ÖÅäÑÕÉ«»º³åÇø");
+        ESP_LOGE(TAG, "å†…å­˜ä¸è¶³ï¼Œæ— æ³•åˆ†é…é¢œè‰²ç¼“å†²åŒº");
         return;
     }
 
-    // Ìî³äÑÕÉ«
+    // å¡«å……é¢œè‰²
     for (int i = 0; i < pixels; i++) {
-        // ÓÉÓÚ SPI ´«ÊäÉæ¼°µ½´óĞ¡¶ËÎÊÌâ£¬Í¨³£ĞèÒª½«ÑÕÉ«¸ßµÍÎ»×Ö½Ú¶Ôµ÷
+        // ç”±äº SPI ä¼ è¾“æ¶‰åŠåˆ°å¤§å°ç«¯é—®é¢˜ï¼Œé€šå¸¸éœ€è¦å°†é¢œè‰²é«˜ä½ä½å­—èŠ‚å¯¹è°ƒ
         buffer[i] = (color >> 8) | (color << 8); 
     }
 
-    // Ë¢ÈëÆÁÄ»
+    // åˆ·å…¥å±å¹•
     esp_lcd_panel_draw_bitmap(panel_handle, x_start, y_start, x_end, y_end, buffer);
     
-    // ÊÍ·ÅÄÚ´æ
+    // é‡Šæ”¾å†…å­˜
     free(buffer);
 }

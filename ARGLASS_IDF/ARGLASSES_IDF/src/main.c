@@ -13,7 +13,7 @@
 #include "speaker_app.h"
 #include "esp_camera.h"
 #include "sd_card_app.h" // ? 加上这句！引入 SD 卡模块
-
+#include "app_mqtt.h" // ? 加上这句！引入 MQTT 模块
 static const char *TAG = "J.A.R.V.I.S";
 
 // ==========================================
@@ -148,12 +148,13 @@ void app_main(void) {
     
     // 启动连接
     esp_websocket_client_start(ws_client);
-
+    app_mqtt_start();
     // 4. 开启独立线程：无情地抓取麦克风数据发给基站
     xTaskCreate(audio_tx_task, "audio_tx_task", 8192, NULL, 5, NULL);
 
     // 主线程可在此挂起
     while(1) {
+        app_mqtt_publish("home/status/sensor", "TEMP:52");
         vTaskDelay(pdMS_TO_TICKS(1000)); 
     }
 }

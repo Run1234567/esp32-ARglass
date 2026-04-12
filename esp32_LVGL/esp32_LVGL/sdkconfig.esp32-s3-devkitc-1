@@ -2226,6 +2226,12 @@ CONFIG_WIFI_PROV_STA_ALL_CHANNEL_SCAN=y
 # end of ESP LVGL PORT
 
 #
+# ESP WebSocket client
+#
+# CONFIG_ESP_WS_CLIENT_ENABLE_DYNAMIC_BUFFER is not set
+# end of ESP WebSocket client
+
+#
 # LVGL configuration
 #
 CONFIG_LV_CONF_SKIP=y

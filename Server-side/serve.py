@@ -61,6 +61,9 @@ chat_history = [
 
 is_translation_mode = False 
 
+# 💡 新增：全局花名册，存放所有连接进来的 ESP32
+connected_clients = set()
+
 # =========================================
 # 🗣️ 核心功能函数区
 # =========================================
@@ -137,7 +140,12 @@ async def speak_sentence(text, websocket):
         # 💡 修改点2：精准控制下发速率（每次3200字节=0.1秒数据，延时0.09秒）
         chunk_size = 3200
         for i in range(0, len(raw_pcm_data), chunk_size):
-            await websocket.send(raw_pcm_data[i:i+chunk_size])
+            # 💡 遍历花名册里的所有设备，挨个发过去！
+            for client in connected_clients:
+                try:
+                    await client.send(raw_pcm_data[i:i+chunk_size])
+                except:
+                    pass # 如果某个设备突然掉线了，忽略报错，继续发给下一个
             await asyncio.sleep(0.09) 
             
     except Exception as e:
@@ -278,19 +286,22 @@ async def speak(text, websocket, loop):
             return
 
     # ====================================================
-    # 📡 第三阶段：统一将处理好的波形数据切片下发给 ESP32
+    # 📡 第三阶段：统一将处理好的波形数据切片下发给【所有】ESP32
     # ====================================================
-   # 统一将处理好的波形数据切片下发给 ESP32
     if raw_pcm_data:
         total_bytes = len(raw_pcm_data)
-        print(f"📡 正在极速透传波形流... ({total_bytes} 字节)")
+        print(f"📡 正在向 {len(connected_clients)} 台设备广播波形流... ({total_bytes} 字节)")
 
-            # 💡 严格对齐 ESP32 的 websocket buffer_size (8192)
         chunk_size = 8192 
         for i in range(0, total_bytes, chunk_size):
             chunk = raw_pcm_data[i:i+chunk_size]
-            await websocket.send(chunk)
-            # 🚨 删掉所有的 sleep！不人为干预，让服务器尽最快速度把这堆数据全塞进网络通道
+            
+            # 💡 遍历花名册里的所有设备，挨个发过去！
+            for client in connected_clients:
+                try:
+                    await client.send(chunk)
+                except:
+                    pass # 如果某个设备突然掉线了，忽略报错，继续发给下一个
                 
         print("✅ 播报下发完毕")
 def transcribe_audio(file_path, websocket, loop):
@@ -400,7 +411,10 @@ def transcribe_audio(file_path, websocket, loop):
 # =========================================
 async def handle_client(websocket):
     loop = asyncio.get_running_loop()
-    print("✅ [服务器] 设备已连接，准备接收音视频流...")
+    
+    # 💡 1. 设备连入，登记到花名册
+    connected_clients.add(websocket)
+    print(f"✅ [服务器] 新设备已连接，当前在线终端数: {len(connected_clients)}")
     
     def create_wav(index):
         wf = wave.open(f"received/audio_{index}.wav", "wb")
@@ -471,6 +485,10 @@ async def handle_client(websocket):
     finally:
         if wav_file:
             wav_file.close()
+            
+        # 💡 2. 设备断开，从花名册中除名
+        connected_clients.remove(websocket)
+        print(f"❌ [服务器] 设备断开，当前在线终端数: {len(connected_clients)}")
 
 async def main():
     async with websockets.serve(handle_client, "0.0.0.0", 8765):
