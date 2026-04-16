@@ -2,12 +2,13 @@
 #include "esp_log.h"
 #include <string.h>
 
+
 static const char *TAG = "APP_MQTT";
 
-// ¶¨ÒåÈ«¾Ö±äÁ¿
+// å®šä¹‰å…¨å±€å˜é‡
 esp_mqtt_client_handle_t mqtt_client = NULL;
-
-// ? ÄÚ²¿ÊÂ¼ş»Øµ÷º¯Êı
+SemaphoreHandle_t next_page_sem = NULL;
+// ? å†…éƒ¨äº‹ä»¶å›è°ƒå‡½æ•°
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
     esp_mqtt_event_handle_t event = event_data;
@@ -15,19 +16,32 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
     switch ((esp_mqtt_event_id_t)event_id) {
         case MQTT_EVENT_CONNECTED:
-            ESP_LOGI(TAG, "? Ö÷ÄÔÁ¬½Ó³É¹¦£¡");
+            ESP_LOGI(TAG, "? ä¸»è„‘è¿æ¥æˆåŠŸï¼");
             esp_mqtt_client_subscribe(client, "home/light/cmd", 0);
-            esp_mqtt_client_publish(client, "home/status/esp32", "ONLINE", 0, 0, 0);
+            esp_mqtt_client_subscribe(client, "jarvis/glasses/book", 0);
             break;
 
         case MQTT_EVENT_DISCONNECTED:
-            ESP_LOGI(TAG, "? Á¬½Ó¶Ï¿ª£¬µÈ´ı×Ô¶¯ÖØÁ¬...");
+            ESP_LOGI(TAG, "? è¿æ¥æ–­å¼€ï¼Œç­‰å¾…è‡ªåŠ¨é‡è¿...");
             break;
 
         case MQTT_EVENT_DATA:
-            ESP_LOGI(TAG, "? ÊÕµ½Ö¸Áî: Ö÷Ìâ=%.*s | ÄÚÈİ=%.*s", 
+            ESP_LOGI(TAG, "ğŸ“© æ”¶åˆ°æŒ‡ä»¤: ä¸»é¢˜=%.*s | å†…å®¹=%.*s", 
                      event->topic_len, event->topic, 
                      event->data_len, event->data);
+
+            // âœ¨ ç²¾å‡†åˆ¤æ–­ï¼šæ˜¯ä¸æ˜¯çœ¼é•œå‘æ¥çš„â€œå‚¬æ›´â€è¯·æ±‚ï¼Ÿ
+            const char *target_topic = "jarvis/glasses/book";
+            if (event->topic_len == strlen(target_topic) && 
+                strncmp(event->topic, target_topic, event->topic_len) == 0) {
+                
+                ESP_LOGI(TAG, "âš¡ æ”¶åˆ°ç¿»é¡µè¯·æ±‚ï¼Œå”¤é†’ SD å¡è¯»å–ä»»åŠ¡ï¼");
+                
+                // é‡Šæ”¾ä¿¡å·é‡ï¼ˆæ‹‰å“è­¦æŠ¥ï¼‰
+                if (next_page_sem != NULL) {
+                    xSemaphoreGive(next_page_sem); 
+                }
+            }
             break;
 
         default:
@@ -35,13 +49,15 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     }
 }
 
-// ? Æô¶¯º¯Êı
+// ? å¯åŠ¨å‡½æ•°
 void app_mqtt_start(void)
 {
     esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri = "mqtt://124.220.224.189:1883",
         .credentials.username = "RUN",
         .credentials.authentication.password = "88888888",
+        .buffer.size = 2048,      // æ¥æ”¶ç¼“å†²åŒºå¤§å° (çœ¼é•œç«¯æœ€éœ€è¦è¿™ä¸ª)
+        .buffer.out_size = 2048,  // å‘é€ç¼“å†²åŒºå¤§å° (SDå¡ç«¯æœ€éœ€è¦è¿™ä¸ª)
     };
 
     mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
@@ -49,12 +65,12 @@ void app_mqtt_start(void)
     esp_mqtt_client_start(mqtt_client);
 }
 
-// ? ¿ì½İ·¢ËÍº¯Êı
+// ? å¿«æ·å‘é€å‡½æ•°
 void app_mqtt_publish(const char *topic, const char *data)
 {
     if (mqtt_client != NULL) {
         esp_mqtt_client_publish(mqtt_client, topic, data, 0, 0, 0);
     } else {
-        ESP_LOGE(TAG, "MQTT Î´³õÊ¼»¯£¬ÎŞ·¨·¢ËÍ£¡");
+        ESP_LOGE(TAG, "MQTT æœªåˆå§‹åŒ–ï¼Œæ— æ³•å‘é€ï¼");
     }
 }

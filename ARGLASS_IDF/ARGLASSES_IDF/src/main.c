@@ -4,75 +4,70 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
-#include "esp_websocket_client.h" // ? ÒıÈëÔ­Éú WebSocket ¿Í»§¶Ë
+#include "esp_websocket_client.h" // ? å¼•å…¥åŸç”Ÿ WebSocket å®¢æˆ·ç«¯
 
-// ÒıÈëÎÒÃÇµÄËÄ´óµ×²ã×é¼ş
+// å¼•å…¥æˆ‘ä»¬çš„å››å¤§åº•å±‚ç»„ä»¶
 #include "wifi_app.h"
 #include "camera_app.h"
 #include "audio_app.h"
 #include "speaker_app.h"
 #include "esp_camera.h"
-#include "sd_card_app.h" // ? ¼ÓÉÏÕâ¾ä£¡ÒıÈë SD ¿¨Ä£¿é
-#include "app_mqtt.h" // ? ¼ÓÉÏÕâ¾ä£¡ÒıÈë MQTT Ä£¿é
+#include "sd_card_app.h" // ? åŠ ä¸Šè¿™å¥ï¼å¼•å…¥ SD å¡æ¨¡å—
+#include "app_mqtt.h" // ? åŠ ä¸Šè¿™å¥ï¼å¼•å…¥ MQTT æ¨¡å—
+#include "record_app.h" // ? åŠ ä¸Šè¿™å¥ï¼å¼•å…¥å½•éŸ³æ¨¡å—
 static const char *TAG = "J.A.R.V.I.S";
 
 // ==========================================
-// ?? ÄúµÄ×¨ÊôÅäÖÃ ??
+// ?? æ‚¨çš„ä¸“å±é…ç½® ??
 // ==========================================
 const char* websocket_url = "ws://124.220.224.189:8765/";
 
 // ==========================================
-// ? È«¾Ö×´Ì¬Óë¾ä±ú
+// ? å…¨å±€çŠ¶æ€ä¸å¥æŸ„
 // ==========================================
 esp_websocket_client_handle_t ws_client;
-bool isPlaying = false;
-TickType_t lastPlayTime = 0;
 
 // ==========================================
-// ? ÅÄÕÕ²¢·¢ËÍ
+// ? æ‹ç…§å¹¶å‘é€
 // ==========================================
 void captureAndSend(void) {
     camera_fb_t * fb = esp_camera_fb_get();
     if (fb) {
-        // Í¨¹ı WebSocket ·¢ËÍ¶ş½øÖÆÍ¼Æ¬Êı¾İ
+        // é€šè¿‡ WebSocket å‘é€äºŒè¿›åˆ¶å›¾ç‰‡æ•°æ®
         esp_websocket_client_send_bin(ws_client, (const char *)fb->buf, fb->len, portMAX_DELAY);
-        ESP_LOGI(TAG, "? ÊÕµ½Ö¸Áî£¬ÕÕÆ¬ÒÑ¼´Ê±·¢ËÍ (%zu bytes)", fb->len);
+        ESP_LOGI(TAG, "? æ”¶åˆ°æŒ‡ä»¤ï¼Œç…§ç‰‡å·²å³æ—¶å‘é€ (%zu bytes)", fb->len);
         esp_camera_fb_return(fb);
     } else {
-        ESP_LOGE(TAG, "? ÉãÏñÍ·²É¼¯Ê§°Ü");
+        ESP_LOGE(TAG, "? æ‘„åƒå¤´é‡‡é›†å¤±è´¥");
     }
 }
 
 // ==========================================
-// ? WebSocket ÊÂ¼ş»Øµ÷ (Ìæ´úÔ­ÏÈµÄ webSocketEvent)
+// ? WebSocket äº‹ä»¶å›è°ƒ (æ›¿ä»£åŸå…ˆçš„ webSocketEvent)
 // ==========================================
 static void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data) {
     esp_websocket_event_data_t *data = (esp_websocket_event_data_t *)event_data;
     
     switch (event_id) {
         case WEBSOCKET_EVENT_CONNECTED:
-            ESP_LOGI(TAG, "? ÒÑÁ¬½Óµ½»ùÕ¾");
+            ESP_LOGI(TAG, "? å·²è¿æ¥åˆ°åŸºç«™");
             break;
             
         case WEBSOCKET_EVENT_DISCONNECTED:
-            ESP_LOGW(TAG, "? Á¬½Ó¶Ï¿ª£¬µ×²ã³¢ÊÔÖØÁ¬ÖĞ...");
+            ESP_LOGW(TAG, "? è¿æ¥æ–­å¼€ï¼Œåº•å±‚å°è¯•é‡è¿ä¸­...");
             break;
             
         case WEBSOCKET_EVENT_DATA:
-            // op_code == 1 ±íÊ¾ÊÕµ½µÄÊÇÎÄ±¾ÏûÏ¢ (TEXT)
+            // op_code == 1 è¡¨ç¤ºæ”¶åˆ°çš„æ˜¯æ–‡æœ¬æ¶ˆæ¯ (TEXT)
             if (data->op_code == 1) {
-                // ÅĞ¶ÏÊÇ·ñÊÇ CAPTURE Ö¸Áî (Ê¹ÓÃ strncmp ·ÀÖ¹Ô½½ç)
+                // åˆ¤æ–­æ˜¯å¦æ˜¯ CAPTURE æŒ‡ä»¤ (ä½¿ç”¨ strncmp é˜²æ­¢è¶Šç•Œ)
                 if (data->data_len >= 7 && strncmp((char *)data->data_ptr, "CAPTURE", 7) == 0) {
-                    ESP_LOGI(TAG, "? ÊÕµ½ÅÄÕÕÇëÇó...");
+                    ESP_LOGI(TAG, "? æ”¶åˆ°æ‹ç…§è¯·æ±‚...");
                     captureAndSend();
                 }
             } 
-            // op_code == 2 ±íÊ¾ÊÕµ½µÄÊÇ¶ş½øÖÆÁ÷ (BIN)£¬¼´ Python ·¢À´µÄÒôÆµ PCM Êı¾İ
+            // op_code == 2 è¡¨ç¤ºæ”¶åˆ°çš„æ˜¯äºŒè¿›åˆ¶æµ (BIN)ï¼Œå³ Python å‘æ¥çš„éŸ³é¢‘ PCM æ•°æ®
             else if (data->op_code == 2) {
-                isPlaying = true;
-                lastPlayTime = xTaskGetTickCount(); // ¼ÇÂ¼µ±Ç° FreeRTOS µÎ´ğÊ±¼ä
-                
-                // ½«ÊÕµ½µÄÒôÆµ¿éÖ±½Ó¶ª¸øÀ®°È²¥·Å£¡
                 playSpeaker((const uint8_t *)data->data_ptr, data->data_len);
             }
             break;
@@ -80,40 +75,54 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base, i
 }
 
 // ==========================================
-// ? Âó¿Ë·ç²É¼¯Óë·¢ËÍÈÎÎñ (Ìæ´úÔ­ÏÈµÄ loop)
+// ğŸ™ï¸ éº¦å…‹é£é‡‡é›†ä¸å‘é€ä»»åŠ¡ (å…¨åŒå·¥ç‹‚é£™ç‰ˆ)
 // ==========================================
 void audio_tx_task(void *pvParameters) {
-    const size_t samples = 512; // Ã¿´Î¶ÁÈ¡ 512 ¸ö²ÉÑùµã (1024 ×Ö½Ú)
+    const size_t samples = 512; // æ¯æ¬¡è¯»å– 512 ä¸ªé‡‡æ ·ç‚¹ (1024 å­—èŠ‚)
     int16_t audioBuffer[samples];
 
     while (1) {
-        // ÅĞ¶ÏÊÇ·ñ²¥·ÅÍê±Ï£ºÈç¹ûµ±Ç°Ê±¼ä¼õÈ¥ÉÏ´ÎÊÕµ½ÒôÆµµÄÊ±¼ä³¬¹ıÁË 500ms
-        if (isPlaying && ((xTaskGetTickCount() - lastPlayTime) * portTICK_PERIOD_MS > 500)) {
-            isPlaying = false;
-        }
-
-        // Èç¹û WebSocket Á¬×Å
+        // å¦‚æœ WebSocket è¿ç€
         if (esp_websocket_client_is_connected(ws_client)) {
-            if (!isPlaying) {
-                // Ã»ÔÚ²¥·ÅÓïÒô£¬Õı³£²ÉÒô²¢·¢ËÍ
-                size_t bytesRead = readAudio(audioBuffer, samples);
-                if (bytesRead > 0) {
-                    esp_websocket_client_send_bin(ws_client, (const char*)audioBuffer, bytesRead, portMAX_DELAY);
-                }
-            } else {
-                // ÕıÔÚ²¥·ÅÓïÒô£¬¶ÁÈ¡µ«²»·¢ËÍ£¬·ÀÖ¹¡°¶Ô½²»ú»ØÒô¡±
-                readAudio(audioBuffer, samples); 
+            
+            // æ— è„‘è¯»ï¼Œæ— è„‘å‘ï¼å®Œå…¨ä¸ç®¡å–‡å­æ˜¯ä¸æ˜¯åœ¨å“ï¼
+            size_t bytesRead = readAudio(audioBuffer, samples);
+            if (bytesRead > 0) {
+                esp_websocket_client_send_bin(ws_client, (const char*)audioBuffer, bytesRead, portMAX_DELAY);
             }
+            
         } else {
-            // Èç¹ûÃ»Á¬ÉÏ»ùÕ¾£¬ÉÔÎ¢ĞİÏ¢Ò»ÏÂ£¬·ÀÖ¹¿ÕÅÜÕ¼ÓÃ CPU
+            // å¦‚æœæ²¡è¿ä¸ŠåŸºç«™ï¼Œç¨å¾®ä¼‘æ¯ä¸€ä¸‹ï¼Œé˜²æ­¢ç©ºè·‘å ç”¨ CPU
             vTaskDelay(pdMS_TO_TICKS(100)); 
         }
     }
 }
+// ==========================================
+// ğŸš€ ç‹¬ç«‹ä»»åŠ¡ï¼šå°è¯´è¯»å–ä¸å‘é€ä¸“å‘˜
+// ==========================================
+void novel_read_task(void *pvParameters) {
+    ESP_LOGI("NOVEL_TASK", "å°è¯´è¯»å–å­ä»»åŠ¡å·²å¯åŠ¨ï¼Œæ­£åœ¨å¾…å‘½...");
+
+    while (1) {
+        // ğŸš¦ æ ¸å¿ƒï¼šåœ¨è¿™é‡Œç­‰ä¿¡å·ï¼Œä¸å¹²æ´»æ—¶å®Œå…¨ä¸å  CPU
+        if (xSemaphoreTake(next_page_sem, portMAX_DELAY) == pdTRUE) {
+            
+            ESP_LOGI("NOVEL_TASK", "æ”¶åˆ°ç¿»é¡µä¿¡å·ï¼Œå¼€å§‹å·¥ä½œ...");
+            
+            // æ‰§è¡Œå…·ä½“çš„è¯»å¡å’Œ MQTT å‘é€é€»è¾‘
+            test_read_novel_next_chunk();
+            
+            ESP_LOGI("NOVEL_TASK", "ä»»åŠ¡å®Œæˆï¼Œç»§ç»­å¾…å‘½ã€‚");
+        }
+    }
+    
+    // ç†è®ºä¸Šæ°¸è¿œä¸ä¼šèµ°åˆ°è¿™é‡Œï¼Œä½†ä½œä¸ºå¥½ä¹ æƒ¯ï¼Œä»»åŠ¡é€€å‡ºè¦åˆ é™¤è‡ªå·±
+    vTaskDelete(NULL);
+}
 
 void app_main(void) {
-
-    // 1. ³õÊ¼»¯ NVS
+     vTaskDelay(pdMS_TO_TICKS(3000)); 
+    // 1. åˆå§‹åŒ– NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
       ESP_ERROR_CHECK(nvs_flash_erase());
@@ -121,40 +130,66 @@ void app_main(void) {
     }
     ESP_ERROR_CHECK(ret);
 
-    ESP_LOGI(TAG, "System booting...");
-
-    
+    // è°ƒç”¨æ¨¡å—æš´éœ²çš„æ¥å£
+    if (init_sd_card() == ESP_OK) {
+        test_sd_card_read_write();
+    } else {
+        ESP_LOGE(TAG, "âš ï¸ SD å¡æ¨¡å—å¼‚å¸¸ï¼Œè·³è¿‡åç»­ä¾èµ–ä»»åŠ¡...");
+    }
     // ==========================================
 
-    // 2. ³õÊ¼»¯ÍøÂçÓëÈı´óÓ²¼ş
+    // 2. åˆå§‹åŒ–ç½‘ç»œä¸ä¸‰å¤§ç¡¬ä»¶
     wifi_init_sta();
     
-    ESP_LOGI(TAG, "? µÈ´ı WiFi ·ÖÅä IP...");
+    ESP_LOGI(TAG, "? ç­‰å¾… WiFi åˆ†é… IP...");
     vTaskDelay(pdMS_TO_TICKS(5000)); 
 
     initCamera();
     initAudio();
     initSpeaker();
-
-    // 3. ÅäÖÃ²¢Æô¶¯ WebSocket ¿Í»§¶Ë
+    next_page_sem = xSemaphoreCreateBinary();
+    
+    if (next_page_sem == NULL) {
+        ESP_LOGE(TAG, "è‡´å‘½é”™è¯¯ï¼šä¿¡å·é‡åˆ›å»ºå¤±è´¥ï¼Œå†…å­˜ä¸è¶³ï¼");
+        return; 
+    }
+    // 3. é…ç½®å¹¶å¯åŠ¨ WebSocket å®¢æˆ·ç«¯
     esp_websocket_client_config_t websocket_cfg = {
         .uri = websocket_url,
-        .reconnect_timeout_ms = 5000, // ¶ÏÏß×Ô¶¯ 5 ÃëÖØÁ¬
+        .reconnect_timeout_ms = 5000, // æ–­çº¿è‡ªåŠ¨ 5 ç§’é‡è¿
     };
     ws_client = esp_websocket_client_init(&websocket_cfg);
     
-    // ×¢²áÊÂ¼ş»Øµ÷¼àÌıÆ÷
+    // æ³¨å†Œäº‹ä»¶å›è°ƒç›‘å¬å™¨
     esp_websocket_register_events(ws_client, WEBSOCKET_EVENT_ANY, websocket_event_handler, (void *)ws_client);
     
-    // Æô¶¯Á¬½Ó
+    // å¯åŠ¨è¿æ¥
     esp_websocket_client_start(ws_client);
     app_mqtt_start();
-    // 4. ¿ªÆô¶ÀÁ¢Ïß³Ì£ºÎŞÇéµØ×¥È¡Âó¿Ë·çÊı¾İ·¢¸ø»ùÕ¾
-    xTaskCreate(audio_tx_task, "audio_tx_task", 8192, NULL, 5, NULL);
 
-    // Ö÷Ïß³Ì¿ÉÔÚ´Ë¹ÒÆğ
+    // 4. å¼€å¯ç‹¬ç«‹çº¿ç¨‹ï¼šæ— æƒ…åœ°æŠ“å–éº¦å…‹é£æ•°æ®å‘ç»™åŸºç«™
+    xTaskCreate(audio_tx_task, "audio_tx_task", 8192, NULL, 5, NULL);
+    xTaskCreate(novel_read_task, "novel_task", 4096 * 2, NULL, 5, NULL);
+    // // 2. æ„‰å¿«çš„ä¸šåŠ¡é€»è¾‘æ¼”ç¤º
+    // ESP_LOGI(TAG, "å‡†å¤‡å¼€å§‹ç¬¬ä¸€æ®µå½•éŸ³...");
+    // vTaskDelay(pdMS_TO_TICKS(2000));
+    
+    // start_record(); // å®ƒä¼šè‡ªåŠ¨å˜æˆ REC_001.wav
+    // vTaskDelay(pdMS_TO_TICKS(5000)); // å½• 5 ç§’
+    // stop_record();
+
+    // ESP_LOGI(TAG, "ä¼‘æ¯ 3 ç§’é’Ÿ...");
+    // vTaskDelay(pdMS_TO_TICKS(1000));
+    // take_photo_and_save(); // è‡ªåŠ¨ä¿å­˜ä¸º IMG_002.jpg
+    // vTaskDelay(pdMS_TO_TICKS(3000)); // å¿…é¡»ç»™ä¸Šä¸€ä¸ªæ–‡ä»¶ä¸€ç‚¹ç‚¹æ”¶å°¾æ—¶é—´ï¼Œé¡ºä¾¿ä¼‘æ¯ä¸‹
+
+    // ESP_LOGI(TAG, "å‡†å¤‡å¼€å§‹ç¬¬äºŒæ®µå½•éŸ³...");
+    // start_record(); // å®ƒä¼šè‡ªåŠ¨å˜æˆ REC_002.wav
+    // vTaskDelay(pdMS_TO_TICKS(15000)); // å½• 3 ç§’
+    // stop_record();
+    // ä¸»çº¿ç¨‹å¯åœ¨æ­¤æŒ‚èµ·
     while(1) {
         app_mqtt_publish("home/status/sensor", "TEMP:52");
-        vTaskDelay(pdMS_TO_TICKS(1000)); 
+        vTaskDelay(pdMS_TO_TICKS(10000)); 
     }
 }

@@ -3,34 +3,34 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-// ÒýÈë ESP-IDF v5 ×¨ÓÃµÄ PDM I2S Çý¶¯
+// å¼•å…¥ ESP-IDF v5 ä¸“ç”¨çš„ PDM I2S é©±åŠ¨
 #include "driver/i2s_pdm.h" 
 
 static const char *TAG = "AUDIO_APP";
 
 // ==========================================
-// ? Âó¿Ë·çÒý½Å¶¨Òå (¸ù¾ÝÄãµÄÅäÖÃ)
+// ? éº¦å…‹é£Žå¼•è„šå®šä¹‰ (æ ¹æ®ä½ çš„é…ç½®)
 // ==========================================
-#define I2S_WS_IO   42  // PDM µÄÊ±ÖÓÊä³öÒý½Å
-#define I2S_SD_IO   41  // PDM µÄÊý¾ÝÊäÈëÒý½Å
+#define I2S_WS_IO   42  // PDM çš„æ—¶é’Ÿè¾“å‡ºå¼•è„š
+#define I2S_SD_IO   41  // PDM çš„æ•°æ®è¾“å…¥å¼•è„š
 
-// I2S ½ÓÊÕÍ¨µÀ¾ä±ú (È«¾Ö±äÁ¿£¬±£´æÍ¨µÀÊµÀý)
+// I2S æŽ¥æ”¶é€šé“å¥æŸ„ (å…¨å±€å˜é‡ï¼Œä¿å­˜é€šé“å®žä¾‹)
 static i2s_chan_handle_t rx_chan; 
 
 void initAudio(void) {
     ESP_LOGI(TAG, "Initializing PDM Microphone...");
 
-    // 1. ·ÖÅä I2S Í¨µÀ (×Ô¶¯Ñ¡Ôñ¿ÕÏÐµÄ I2S ¶Ë¿Ú£¬Éè¶¨ÎªÖ÷»úÄ£Ê½)
+    // 1. åˆ†é… I2S é€šé“ (è‡ªåŠ¨é€‰æ‹©ç©ºé—²çš„ I2S ç«¯å£ï¼Œè®¾å®šä¸ºä¸»æœºæ¨¡å¼)
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
     ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, NULL, &rx_chan));
 
-    // 2. ÅäÖÃ PDM RX Ä£Ê½µÄ²ÎÊý
+    // 2. é…ç½® PDM RX æ¨¡å¼çš„å‚æ•°
     i2s_pdm_rx_config_t pdm_rx_cfg = {
-        // ²ÉÑùÂÊÉèÎª 16000Hz
+        // é‡‡æ ·çŽ‡è®¾ä¸º 16000Hz
         .clk_cfg = I2S_PDM_RX_CLK_DEFAULT_CONFIG(16000),
-        // 16bit ²ÉÑùÉî¶È£¬µ¥ÉùµÀÄ£Ê½ (Mono)
+        // 16bit é‡‡æ ·æ·±åº¦ï¼Œå•å£°é“æ¨¡å¼ (Mono)
         .slot_cfg = I2S_PDM_RX_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO),
-        // Òý½ÅÓ³ÉäÅäÖÃ
+        // å¼•è„šæ˜ å°„é…ç½®
         .gpio_cfg = {
             .clk = I2S_WS_IO,
             .din = I2S_SD_IO,
@@ -40,21 +40,21 @@ void initAudio(void) {
         },
     };
 
-    // 3. ½«ÅäÖÃÓ¦ÓÃµ½Í¨µÀ£¬²¢Æô¶¯Í¨µÀ
+    // 3. å°†é…ç½®åº”ç”¨åˆ°é€šé“ï¼Œå¹¶å¯åŠ¨é€šé“
     ESP_ERROR_CHECK(i2s_channel_init_pdm_rx_mode(rx_chan, &pdm_rx_cfg));
     ESP_ERROR_CHECK(i2s_channel_enable(rx_chan));
 
-    ESP_LOGI(TAG, "? Âó¿Ë·ç I2S PDM Ä£Ê½³õÊ¼»¯³É¹¦£¡");
+    ESP_LOGI(TAG, "? éº¦å…‹é£Ž I2S PDM æ¨¡å¼åˆå§‹åŒ–æˆåŠŸï¼");
 }
 
 size_t readAudio(int16_t* buffer, size_t samples) {
     size_t bytes_read = 0;
     
-    // ´ÓÍ¨µÀ¶ÁÈ¡Êý¾Ý£¬¸øÓè 10ms µÄ³¬Ê±Ê±¼ä·À¿¨ËÀ
+    // ä»Žé€šé“è¯»å–æ•°æ®ï¼Œç»™äºˆ 10ms çš„è¶…æ—¶æ—¶é—´é˜²å¡æ­»
     esp_err_t ret = i2s_channel_read(rx_chan, buffer, samples * sizeof(int16_t), &bytes_read, pdMS_TO_TICKS(10));
     
     if (ret != ESP_OK) {
-        // Èç¹û³¬Ê±»ò³ö´í£¬¿ÉÒÔÔÚÕâÀï´òÓ¡ÈÕÖ¾£¨¸ßÆµ¶ÁÈ¡Ê±½¨Òé×¢ÊÍµô´íÎóÈÕÖ¾·ÀË¢ÆÁ£©
+        // å¦‚æžœè¶…æ—¶æˆ–å‡ºé”™ï¼Œå¯ä»¥åœ¨è¿™é‡Œæ‰“å°æ—¥å¿—ï¼ˆé«˜é¢‘è¯»å–æ—¶å»ºè®®æ³¨é‡ŠæŽ‰é”™è¯¯æ—¥å¿—é˜²åˆ·å±ï¼‰
         // ESP_LOGW(TAG, "Audio read timeout or error");
     }
     

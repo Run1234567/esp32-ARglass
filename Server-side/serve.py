@@ -15,6 +15,10 @@ import edge_tts  # 💡 引入库
 import io
 import pyttsx3 # 确保你顶部导入了它
 import paho.mqtt.client as mqtt # 💡 新增：导入 MQTT 库
+import torch # 记得在最顶部 import torch
+import json
+from datetime import datetime
+from zhdate import ZhDate  # 记得在终端运行 pip install zhdate
 
 # =========================================
 # 📡 MQTT 极简连接测试
@@ -84,9 +88,15 @@ AudioSegment.ffprobe   = "ffprobe"
 # =========================================
 # 🧠 AI 双脑、语音模型与全局状态初始化
 # =========================================
-print("⏳ 正在加载 Whisper 语音识别模型 (tiny)...")
+print("⏳ 正在加载 Whisper 语音识别模型 (base)...")
 model = WhisperModel("base", device="cpu", compute_type="int8")
 print("✅ 语音识别模型加载完毕！")
+
+print("⏳ 正在从本地加载 Silero VAD 模型...")
+# 💡 改为离线加载本地 jit 文件
+vad_model = torch.jit.load('silero_vad.jit', map_location='cpu')
+vad_model.eval() # 设置为评估模式
+print("✅ VAD 模型本地加载成功！")
 
 # 1. 聊天主脑 (DeepSeek)
 AI_CLIENT = OpenAI(
@@ -491,16 +501,27 @@ async def handle_client(websocket):
             if isinstance(message, bytes):
                 if len(message) < 3000: 
                     audio_data = np.frombuffer(message, dtype=np.int16)
-                    volume = int(np.max(np.abs(audio_data))) 
                     chunk_time = len(audio_data) / 16000.0  
-
                     current_record_time += chunk_time
 
-                    bar_len = min(int(volume / 200), 40) 
-                    bar_str = "█" * bar_len + "-" * (40 - bar_len)
-                    print(f"\r🎤 实时音量: {volume:5d} [{bar_str}]", end="", flush=True)
+                    # 🌟 1. 数据格式转换与 VAD 计算 (这部分你写对了)
+                    audio_float32 = audio_data.astype(np.float32) / 32768.0
+                    audio_tensor = torch.from_numpy(audio_float32)
 
-                    if volume > SILENCE_THRESHOLD:
+                    try:
+                        speech_prob = vad_model(audio_tensor, 16000).item()
+                    except Exception as e:
+                        speech_prob = 0.0
+
+                    bar_len = int(speech_prob * 40)
+                    bar_str = "█" * bar_len + "-" * (40 - bar_len)
+                    print(f"\r🎤 人声概率: {speech_prob:.2f} [{bar_str}]", end="", flush=True)
+
+                    # 🌟 2. 重新定义更符合人类习惯的断句时间
+                    MAX_SILENCE_DURATION = 1.2   # 喘气停顿 1.2 秒才算说完
+                    MAX_RECORD_DURATION = 20.0   # 一句话最多允许连说 20 秒
+
+                    if speech_prob > 0.5:
                         silence_timer = 0.0  
                         has_spoken = True
                     else:
@@ -508,11 +529,20 @@ async def handle_client(websocket):
 
                     wav_file.writeframes(message)
                     
-                    if (has_spoken and silence_timer >= MAX_SILENCE_DURATION) or current_record_time >= MAX_RECORD_DURATION:
+                    # 🌟 3. 新增的魔法：静音垃圾桶！
+                    # 如果一直没人说话，且录了超过 3 秒的空气，直接倒掉重来，不给 Whisper 发垃圾数据
+                    if not has_spoken and current_record_time > 3.0:
+                        wav_file.close()
+                        wav_file = create_wav(audio_count) 
+                        current_record_time = 0.0
+                        silence_timer = 0.0
+                    
+                    # 🌟 4. 修复后的智能断句条件：必须是“已经开口说话了”才允许断句
+                    elif has_spoken and (silence_timer >= MAX_SILENCE_DURATION or current_record_time >= MAX_RECORD_DURATION):
                         
                         current_file_path = f"received/audio_{audio_count}.wav"
                         wav_file.close()
-                        print(f"\n✂️ 自动断句 ({current_record_time:.1f}秒)，开始识别...")
+                        print(f"\n✂️ 智能断句触发 ({current_record_time:.1f}秒)，开始识别...")
                         
                         asyncio.create_task(asyncio.to_thread(transcribe_audio, current_file_path, websocket, loop))
                         
@@ -541,7 +571,54 @@ async def handle_client(websocket):
         connected_clients.remove(websocket)
         print(f"❌ [服务器] 设备断开，当前在线终端数: {len(connected_clients)}")
 
+def get_lunar_date():
+    """获取农历日期并截断年份，只保留类似 '二月三日'"""
+    try:
+        lunar = ZhDate.today()
+        # lunar.chinese() 默认输出 "二零二四年二月初三"
+        # [5:] 的作用是切掉前5个字符（二零二四年），只留后面
+        return lunar.chinese()[5:]
+    except Exception as e:
+        return "获取失败"
+
+async def time_sync_task():
+    """时间同步任务，每秒发布一次时间信息到 MQTT"""
+    while True:
+        try:
+            # 1. 抓取当前系统时间和阳历
+            now = datetime.now()
+            time_str = now.strftime("%H:%M")   # 生成 "07:04"
+            date_str = now.strftime("%m/%d")   # 生成 "03/21"
+            
+            # 2. 调用刚才写的函数抓取农历
+            lunar_str = get_lunar_date()
+
+            # 3. 组装成你要的 JSON 格式
+            payload_dict = {
+                "time": time_str,
+                "date": date_str,
+                "lunar": lunar_str
+            }
+            
+            # 4. 把字典转换成字符串
+            # (ensure_ascii=False 是关键，不然中文字符会变成 \uXXXX 这样的乱码)
+            payload_json = json.dumps(payload_dict, ensure_ascii=False)
+            
+            # 5. 通过 MQTT 发布出去
+            # 假设 client 是你的 mqtt 实例，Topic 记得和 ESP32 对应
+            mqtt_client.publish("jarvis/cmd/time", payload_json)
+            print(f"[{time_str}] 已下发同步数据: {payload_json}")
+            
+        except Exception as e:
+            print(f"时间同步任务出错: {e}")
+        
+        # 每秒同步一次
+        await asyncio.sleep(1)
+
 async def main():
+    # 启动时间同步任务
+    asyncio.create_task(time_sync_task())
+    
     async with websockets.serve(handle_client, "0.0.0.0", 8765):
         print("🚀 J.A.R.V.I.S 双脑服务器已启动，正在监听 8765 端口...")
         await asyncio.Future()

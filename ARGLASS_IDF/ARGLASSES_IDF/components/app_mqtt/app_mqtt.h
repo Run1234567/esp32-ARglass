@@ -5,7 +5,7 @@
 
 // 暴露出全局客户端句柄
 extern esp_mqtt_client_handle_t mqtt_client;
-
+extern SemaphoreHandle_t next_page_sem;
 // 初始化并启动 MQTT
 void app_mqtt_start(void);
 

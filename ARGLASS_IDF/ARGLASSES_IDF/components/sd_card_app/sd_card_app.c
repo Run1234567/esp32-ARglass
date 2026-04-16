@@ -1,107 +1,92 @@
 #include <stdio.h>
 #include <string.h>
-#include "sd_card_app.h"
+#include "esp_log.h"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
-#include "driver/sdspi_host.h"
-#include "driver/spi_common.h"
-#include "esp_log.h"
+#include "driver/sdmmc_host.h" 
 #include "driver/gpio.h" 
-#include "freertos/FreeRTOS.h" // ? ±ØĞë¼Ó£¬ÓÃÓÚ vTaskDelay
-#include "freertos/task.h"
+#include "app_mqtt.h" // ? å¼•å…¥ MQTT æ¨¡å—çš„å¤´æ–‡ä»¶ï¼Œè·å–å…¨å±€å®¢æˆ·ç«¯å¥æŸ„
+// å¼•å…¥è‡ªå·±çš„å¤´æ–‡ä»¶
+#include "sd_card_app.h"
 
-static const char *TAG = "SD_CARD";
 
-// XIAO ESP32S3 À©Õ¹°åµÄ SD ¿¨ SPI Òı½Å
-#define PIN_NUM_MISO 8
-#define PIN_NUM_MOSI 9
-#define PIN_NUM_CLK  7
-#define PIN_NUM_CS   21
+static const char *TAG = "SD_APP";
+
+
+#include "cJSON.h"          // âœ¨ å¼•å…¥ ESP-IDF è‡ªå¸¦çš„ cJSON åº“
+#include "mqtt_client.h"    // âœ¨ å¼•å…¥ ESP-IDF è‡ªå¸¦çš„ MQTT å®¢æˆ·ç«¯åº“
+
+// ==========================================
+// ğŸ“¡ å°è£…å‡½æ•°ï¼šå°†å°è¯´æ–‡æœ¬æ‰“åŒ…æˆ JSON å¹¶é€šè¿‡ MQTT å‘é€
+// ==========================================
+void send_novel_chunk_via_mqtt(esp_mqtt_client_handle_t client, const char *text_chunk) {
+    if (client == NULL || text_chunk == NULL) {
+        ESP_LOGE("MQTT_SEND", "âŒ å®¢æˆ·ç«¯æœªè¿æ¥æˆ–æ–‡æœ¬ä¸ºç©ºï¼");
+        return;
+    }
+
+    // 1. åˆ›å»º JSON æ ¹å¯¹è±¡
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) return;
+
+    // 2. æ·»åŠ æ•°æ®èŠ‚ç‚¹ (cJSON ä¼šè‡ªåŠ¨å¤„ç†æ–‡æœ¬é‡Œçš„ç‰¹æ®Šå­—ç¬¦è½¬ä¹‰)
+    cJSON_AddStringToObject(root, "cmd", "novel");
+    cJSON_AddStringToObject(root, "data", text_chunk);
+
+    // 3. å°† JSON å¯¹è±¡å‹ç¼©æˆå­—ç¬¦ä¸² (PrintUnformatted çœç©ºé—´ï¼Œä¸å¸¦å¤šä½™ç©ºæ ¼æ¢è¡Œ)
+    char *json_string = cJSON_PrintUnformatted(root);
+
+    if (json_string != NULL) {
+        // 4. å‘é€ç»™ AR çœ¼é•œçš„ä¸“å± Topic (QoS=1 ä¿è¯é€è¾¾)
+        int msg_id = esp_mqtt_client_publish(client, "jarvis/glasses/display", json_string, 0, 1, 0);
+        
+        ESP_LOGI("MQTT_SEND", "âœ… æˆåŠŸå‘é€æ•°æ®åŒ… [ID:%d], è´Ÿè½½å¤§å°: %d å­—èŠ‚", msg_id, strlen(json_string));
+        
+        // 5. âš ï¸ æå…¶é‡è¦ï¼šé‡Šæ”¾ Print ç”Ÿæˆçš„å­—ç¬¦ä¸²å†…å­˜ï¼Œå¦åˆ™ä¼šå¯¼è‡´å†…å­˜æ³„æ¼ï¼
+        free(json_string);
+    } else {
+        ESP_LOGE("MQTT_SEND", "âŒ JSON æ ¼å¼åŒ–å¤±è´¥ï¼Œå¯èƒ½å†…å­˜ä¸è¶³ï¼");
+    }
+
+    // 6. æ¸…ç† JSON å¯¹è±¡æ ‘
+    cJSON_Delete(root);
+}
+
 
 esp_err_t init_sd_card(void) {
     esp_err_t ret;
+    sdmmc_card_t *card;
 
-    // 1. ÅäÖÃÎÄ¼şÏµÍ³¹ÒÔØ²ÎÊı
     esp_vfs_fat_sdmmc_mount_config_t mount_config = {
-        .format_if_mount_failed = false, 
-        .max_files = 5,                  
+        .format_if_mount_failed = false,
+        .max_files = 5,
         .allocation_unit_size = 16 * 1024
     };
 
-    sdmmc_card_t *card;
-    const char mount_point[] = MOUNT_POINT; 
+    ESP_LOGI(TAG, "æ­£åœ¨åˆå§‹åŒ–åŸç”Ÿ SDMMC æ€»çº¿...");
 
-    ESP_LOGI(TAG, "ÕıÔÚ³õÊ¼»¯ SPI ×ÜÏß...");
+    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+    host.max_freq_khz = SDMMC_FREQ_DEFAULT; 
 
-    // ==========================================
-    // ?? ºËĞÄ·ÀÓù 1£ºÇ¿ÖÆ¿ªÆôÊı¾İÒı½ÅÄÚ²¿ÉÏÀ­
-    // ==========================================
-    gpio_set_pull_mode(PIN_NUM_MOSI, GPIO_PULLUP_ONLY);
-    gpio_set_pull_mode(PIN_NUM_MISO, GPIO_PULLUP_ONLY);
-    gpio_set_pull_mode(PIN_NUM_CLK,  GPIO_PULLUP_ONLY);
+    // å®˜æ–¹ Sense æ‰©å±•æ¿å¼•è„šæ˜ å°„
+    sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
+    slot_config.width = 1;         
+    slot_config.clk = 7;           
+    slot_config.cmd = 9;           
+    slot_config.d0  = 8;           
+    slot_config.d1 = -1;
+    slot_config.d2 = -1;
+    slot_config.d3 = -1; 
+    slot_config.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP; 
 
-    // ==========================================
-    // ?? ºËĞÄ·ÀÓù 2£ºÇ¿ÖÆ»½ĞÑ SD ¿¨½øÈë SPI Ä£Ê½£¡
-    // ±ØĞëÔÚ³õÊ¼»¯ SPI Ö®Ç°£¬È·±£ CS Òı½Å´¦ÓÚÎÈ¶¨µÄ¸ßµçÆ½
-    // ==========================================
-    gpio_config_t io_conf = {
-        .intr_type = GPIO_INTR_DISABLE,
-        .mode = GPIO_MODE_OUTPUT,
-        .pin_bit_mask = (1ULL << PIN_NUM_CS),
-        .pull_down_en = 0,
-        .pull_up_en = 1
-    };
-    gpio_config(&io_conf);
-    gpio_set_level(PIN_NUM_CS, 1);  // Ç¿ĞĞÀ­¸ß CS Òı½Å
-    vTaskDelay(pdMS_TO_TICKS(10));  // Í£¶Ù 10ms£¬ÈÃ SD ¿¨·´Ó¦¹ıÀ´
+    ret = esp_vfs_fat_sdmmc_mount(MOUNT_POINT, &host, &slot_config, &mount_config, &card);
 
-    // 2. ÅäÖÃ SPI ×ÜÏß
-    spi_bus_config_t bus_cfg = {
-        .mosi_io_num = PIN_NUM_MOSI,
-        .miso_io_num = PIN_NUM_MISO,
-        .sclk_io_num = PIN_NUM_CLK,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
-        .max_transfer_sz = 4000,
-    };
-    
-    ret = spi_bus_initialize(SPI2_HOST, &bus_cfg, SDSPI_DEFAULT_DMA);
-    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) { 
-        ESP_LOGE(TAG, "SPI ×ÜÏß³õÊ¼»¯Ê§°Ü£¡´íÎóÂë: %s", esp_err_to_name(ret));
-        return ret;
-    }
-
-    // 3. ÅäÖÃ SD ¿¨Æ¬Ñ¡Òı½Å¼°Çı¶¯
-    sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
-    slot_config.gpio_cs = PIN_NUM_CS;
-    slot_config.host_id = SPI2_HOST;
-
-    // 4. ÕıÊ½¹ÒÔØĞéÄâÎÄ¼şÏµÍ³
-    ESP_LOGI(TAG, "ÕıÔÚ¹ÒÔØÎÄ¼şÏµÍ³µ½ %s ...", mount_point);
-    
-    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    host.slot = SPI2_HOST; 
-    
-    // ==========================================
-    // ?? ºËĞÄ·ÀÓù 3£ºÌáÉıÖ÷Æµ£¬·ÀÖ¹ÎÕÊÖµôÏß
-    // ´Ó 400 ¸ÄÎª 4000 (4MHz)
-    // ==========================================
-    host.max_freq_khz = 400; 
-    
-    ret = esp_vfs_fat_sdspi_mount(mount_point, &host, &slot_config, &mount_config, &card);
-    
     if (ret != ESP_OK) {
-        if (ret == ESP_FAIL) {
-            ESP_LOGE(TAG, "ÎŞ·¨¹ÒÔØÎÄ¼şÏµÍ³¡£Ó²¼ş¿ÉÄÜ½Ó´¥²»Á¼£¬»ò¿¨Ğè¸ñÊ½»¯Îª FAT32¡£");
-        } else if (ret == ESP_ERR_TIMEOUT) {
-            ESP_LOGE(TAG, "¶ÁÈ¡ SD ¿¨³¬Ê±£¡Çë°Î²å¿¨²Û»ò¼ì²éÒı½Å¶¨Òå¡£");
-        } else {
-            ESP_LOGE(TAG, "¹ÒÔØÊ§°Ü£¬µ×²ã´íÎóÂë: %s", esp_err_to_name(ret));
-        }
+        ESP_LOGE(TAG, "æŒ‚è½½å¤±è´¥ï¼Œé”™è¯¯ç : %s", esp_err_to_name(ret));
         return ret;
     }
 
-    ESP_LOGI(TAG, "? SD ¿¨¹ÒÔØ³É¹¦£¡");
+    ESP_LOGI(TAG, "ğŸŒŸ æ¨¡å—åŒ–åŸç”Ÿ SDMMC æŒ‚è½½æˆåŠŸï¼");
     sdmmc_card_print_info(stdout, card);
     
     return ESP_OK;
@@ -109,41 +94,91 @@ esp_err_t init_sd_card(void) {
 
 void test_sd_card_read_write(void) {
     const char *file_path = MOUNT_POINT"/test.txt";
-    ESP_LOGI(TAG, "--- ¿ªÊ¼¶ÁĞ´²âÊÔ ---");
+    ESP_LOGI(TAG, "--- å¼€å§‹è¯»å†™æµ‹è¯• ---");
 
-    // ==========================================
-    // Ğ´Èë²âÊÔ (Write)
-    // ==========================================
-    ESP_LOGI(TAG, "ÕıÔÚ´´½¨²¢Ğ´ÈëÎÄ¼ş: %s", file_path);
     FILE *f = fopen(file_path, "w");
     if (f == NULL) {
-        ESP_LOGE(TAG, "´ò¿ªÎÄ¼şÓÃÓÚĞ´ÈëÊ§°Ü£¡");
+        ESP_LOGE(TAG, "âŒ æ‰“å¼€æ–‡ä»¶å†™å…¥å¤±è´¥ï¼");
         return;
     }
-    fprintf(f, "Hello Seeed XIAO ESP32S3! SD Card is fully operational.\n");
+    fprintf(f, "Hello Modular SDMMC Architecture!\n");
     fclose(f);
-    ESP_LOGI(TAG, "? ÎÄ¼şĞ´Èë³É¹¦£¡");
+    ESP_LOGI(TAG, "âœ… æ–‡ä»¶å†™å…¥æˆåŠŸï¼");
 
-    // ==========================================
-    // ¶ÁÈ¡²âÊÔ (Read)
-    // ==========================================
-    ESP_LOGI(TAG, "ÕıÔÚ¶ÁÈ¡ÎÄ¼ş...");
     f = fopen(file_path, "r");
     if (f == NULL) {
-        ESP_LOGE(TAG, "´ò¿ªÎÄ¼şÓÃÓÚ¶ÁÈ¡Ê§°Ü£¡");
+        ESP_LOGE(TAG, "âŒ æ‰“å¼€æ–‡ä»¶è¯»å–å¤±è´¥ï¼");
         return;
     }
-    
     char line[128];
-    // ¶ÁÈ¡µÚÒ»ĞĞ
     if (fgets(line, sizeof(line), f) != NULL) {
-        // È¥³ıÄ©Î²µÄ»»ĞĞ·û·½±ã´òÓ¡
         char *pos = strchr(line, '\n');
         if (pos) { *pos = '\0'; }
-        
-        ESP_LOGI(TAG, "? ³É¹¦¶ÁÈ¡ÄÚÈİ: '%s'", line);
-    } else {
-        ESP_LOGE(TAG, "ÎÄ¼ş¶ÁÈ¡Îª¿Õ»ò³ö´í£¡");
+        ESP_LOGI(TAG, "ğŸ“– æˆåŠŸè¯»å–å†…å®¹: '%s'", line);
     }
     fclose(f);
+}
+
+
+// ==========================================
+// ğŸ’¡ ä¿®æ”¹è¿™é‡Œï¼šå°†è¯»å–å—å¤§å°è®¾å®šä¸º 1024 å­—èŠ‚ (1KB)
+// è¿™åˆšå¥½èƒ½ä¿è¯è¦†ç›–ç”šè‡³ç•¥å¾®è¶…å‡ºâ€œä¸¤ä¸ªå®Œæ•´å±å¹•â€çš„ä¸­æ–‡å­—æ•°
+// ==========================================
+#define READ_CHUNK_SIZE 1024 
+#define NOVEL_FILE_PATH MOUNT_POINT"/novel.txt"
+
+// âœ¨ å…¨å±€ä¹¦ç­¾ï¼šè®°å½•åœ¨ SD å¡æ–‡ä»¶ä¸­çš„ç»å¯¹å­—èŠ‚ä½ç½®
+static uint32_t current_file_offset = 0; 
+
+// ==========================================
+// ğŸ“– çº¯å‡€ç‰ˆï¼šä» SD å¡è¯»å–ä¸‹ä¸€æ®µå®‰å…¨æ–‡æœ¬å¹¶æ‰“å°
+// ==========================================
+void test_read_novel_next_chunk(void) {
+    FILE *f = fopen(NOVEL_FILE_PATH, "r");
+    if (f == NULL) {
+        ESP_LOGE("SD_READ", "âŒ æ‰¾ä¸åˆ°æ–‡ä»¶: %s", NOVEL_FILE_PATH);
+        return;
+    }
+
+    // 1. ã€ç¿»ä¹¦ã€‘ï¼šè·³åˆ°ä¸Šæ¬¡è¯»åˆ°çš„å­—èŠ‚ä½ç½®
+    fseek(f, current_file_offset, SEEK_SET);
+
+    // 2. ã€çœ‹å­—ã€‘ï¼šæå–æŒ‡å®šå¤§å°çš„å­—èŠ‚ (ç°åœ¨ä¸€æ¬¡æ 1024 å­—èŠ‚)
+    char read_buffer[READ_CHUNK_SIZE + 1];
+    size_t bytes_read = fread(read_buffer, 1, READ_CHUNK_SIZE, f);
+
+    // æ£€æŸ¥æ˜¯å¦è¯»åˆ°äº†æ–‡ä»¶å¤§ç»“å±€
+    if (bytes_read == 0) {
+        ESP_LOGI("SD_READ", "ğŸ‰ æ­å–œï¼Œå…¨ä¹¦å®Œï¼");
+        fclose(f);
+        return;
+    }
+
+    // 3. ã€é˜²ä¹±ç æˆªæ–­ã€‘ï¼šå¤„ç† UTF-8 è¾¹ç•Œ
+    // å“ªæ€•æˆ‘ä»¬è¯»äº† 1024 å­—èŠ‚ï¼Œå¦‚æœç¬¬ 1024 ä¸ªå­—èŠ‚åˆšå¥½åˆ‡åœ¨æ±‰å­—ä¸­é—´ï¼Œ
+    // ä¸‹é¢è¿™æ®µç¥ä»™é€»è¾‘ä¾ç„¶ä¼šè®©å®ƒå®‰å…¨å›é€€åˆ°ç¬¬ 1022 æˆ– 1021 ä¸ªå­—èŠ‚ï¼
+    int valid_len = bytes_read;
+    
+    // å¦‚æœè¿˜æ²¡åˆ°æ–‡ä»¶æœ«å°¾ï¼Œæ‰§è¡Œå®‰å…¨å›é€€
+    if (bytes_read == READ_CHUNK_SIZE) {
+        // UTF-8 çš„å»¶ç»­å­—èŠ‚ç‰¹å¾æ˜¯ 10xxxxxx (å³ 0x80 åˆ° 0xBF)
+        while (valid_len > 0 && (read_buffer[valid_len - 1] & 0xC0) == 0x80) {
+            valid_len--; 
+        }
+        // æ‰¾åˆ°äº†æ±‰å­—çš„é¦–å­—èŠ‚ (ä¾‹å¦‚ 1110xxxx)ï¼Œä¹ŸæŠŠå®ƒç æ‰ç•™ç»™ä¸‹ä¸€æ¬¡
+        if (valid_len > 0 && (read_buffer[valid_len - 1] & 0xC0) == 0xC0) {
+            valid_len--; 
+        }
+    }
+
+    // 4. ã€å°å£å¹¶æ›´æ–°ä¹¦ç­¾ã€‘
+    read_buffer[valid_len] = '\0';
+    current_file_offset += valid_len; // ä¹¦ç­¾åŠ ä¸Šè¿™æ¬¡æœ‰æ•ˆè¯»å–çš„å­—èŠ‚æ•°
+    
+    fclose(f);
+
+    // 5. ã€å±•ç¤ºç»“æœã€‘ï¼šæ‰“å°åˆ°ä¸²å£
+    ESP_LOGI("SD_READ", "--- å½“å‰ä¹¦ç­¾: %lu ---", current_file_offset);
+    printf("%s\n\n", read_buffer); 
+    send_novel_chunk_via_mqtt(mqtt_client, read_buffer);
 }

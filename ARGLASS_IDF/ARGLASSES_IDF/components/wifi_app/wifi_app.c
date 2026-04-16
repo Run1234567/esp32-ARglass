@@ -10,7 +10,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 
-// ?? WiFi ²ÎÊıÅäÖÃÇø
+// ?? WiFi å‚æ•°é…ç½®åŒº
 #define WIFI_SSID      "RUN"      
 #define WIFI_PASS      "88888888" 
 #define MAXIMUM_RETRY  10         
@@ -18,7 +18,7 @@
 static const char *TAG = "WIFI_TEST"; 
 static int s_retry_num = 0;           
 
-// ? ÊÂ¼ş»Øµ÷º¯Êı£¨¡°½ÓÏßÔ±¡±£©
+// ? äº‹ä»¶å›è°ƒå‡½æ•°ï¼ˆâ€œæ¥çº¿å‘˜â€ï¼‰
 static void event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data) {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
@@ -42,7 +42,7 @@ static void event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
-// ? ³õÊ¼»¯ WiFi ¹¦ÄÜµÄº¯Êı
+// ? åˆå§‹åŒ– WiFi åŠŸèƒ½çš„å‡½æ•°
 void wifi_init_sta(void) {
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());

@@ -5,7 +5,7 @@
 static const char *TAG = "CAMERA_APP";
 
 // ==========================================
-// ? ÉãÏñÍ·Òı½Å¶¨Òå (»ùÓÚÄãµÄÅäÖÃ)
+// ? æ‘„åƒå¤´å¼•è„šå®šä¹‰ (åŸºäºä½ çš„é…ç½®)
 // ==========================================
 #define PWDN_GPIO_NUM     -1
 #define RESET_GPIO_NUM    -1
@@ -25,7 +25,7 @@ static const char *TAG = "CAMERA_APP";
 #define PCLK_GPIO_NUM     13
 
 // ==========================================
-// ? ³õÊ¼»¯ÉãÏñÍ·
+// ? åˆå§‹åŒ–æ‘„åƒå¤´
 // ==========================================
 void initCamera(void) {
     camera_config_t config;
@@ -49,7 +49,7 @@ void initCamera(void) {
     config.pin_reset = RESET_GPIO_NUM;
     config.xclk_freq_hz = 20000000;
     
-    // ·Ö±æÂÊÉèÖÃÎª UXGA (1600x1200)
+    // åˆ†è¾¨ç‡è®¾ç½®ä¸º UXGA (1600x1200)
     config.frame_size = FRAMESIZE_UXGA;
     
     config.pixel_format = PIXFORMAT_JPEG;
@@ -61,7 +61,7 @@ void initCamera(void) {
     ESP_LOGI(TAG, "Initializing camera...");
     esp_err_t err = esp_camera_init(&config);
     
-    // Ôö¼ÓÍêÕûµÄ×´Ì¬ÅĞ¶Ï
+    // å¢åŠ å®Œæ•´çš„çŠ¶æ€åˆ¤æ–­
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Camera init failed with error 0x%x", err);
         return;

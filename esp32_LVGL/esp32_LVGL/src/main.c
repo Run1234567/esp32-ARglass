@@ -16,6 +16,15 @@
 #include "my_wifi.h"
 #include "audio_driver.h"
 #include "app_mqtt.h"
+
+
+#include "ui_ar_glass.h"
+#include "ui_menu_screen.h"
+#include "ui_globals.h" // 引入全局变量枢纽
+#include "ui_novel_screen.h" // 引入小说屏幕的头文件，里面有初始化函数声明
+
+
+
 // ==========================================
 // 🌐 服务器配置 (请改成你运行 Python 脚本的电脑 IP)
 // ==========================================
@@ -24,7 +33,7 @@ esp_websocket_client_handle_t ws_client;
 LV_FONT_DECLARE(my_font_cn_16);
 
 #define SAMPLE_RATE 16000       // 采样率必须和 audio_driver.c 里配置的一致
-#define FREQUENCY 440.0         // 测试音频率 440Hz (标准音A)
+#define FREQUENCY 440.0         // 测试音频频率 440Hz (标准音A)
 #define AMPLITUDE 8000          // 音量大小 (16位PCM最大是32767，8000是一个适中且不刺耳的音量)
 #define BUFFER_SAMPLES 512      // 每次计算/发送的采样点数
 
@@ -108,7 +117,7 @@ void app_main(void) {
 
     ESP_LOGI(TAG, "1. 启动物理屏幕驱动...");
     lcd_init();
-
+    
     ESP_LOGI(TAG, "2. 初始化 LVGL 移植层...");
     lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     lvgl_port_init(&lvgl_cfg);
@@ -125,27 +134,16 @@ void app_main(void) {
         .flags = { .buff_dma = true }
     };
     lvgl_port_add_disp(&disp_cfg);
-
+    ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_handle, true, false));
     ESP_LOGI(TAG, "4. 绘制华丽的 UI...");
     if (lvgl_port_lock(0)) {
         
-        // 创建一个文本标签
-        lv_obj_t * label = lv_label_create(lv_scr_act());
-        
-        // 创建并初始化样式
-        static lv_style_t style_cn;
-        lv_style_init(&style_cn);
-        
-        // ✨ 魔法在这里：把刚刚声明的中文字库绑定到样式上！
-        lv_style_set_text_font(&style_cn, &my_font_cn_16); 
-        lv_obj_add_style(label, &style_cn, 0);
-        
-        // 设置中文文本并居中
-        lv_label_set_text(label, "J.A.R.V.I.S 刘梓润真帅");
-        lv_obj_center(label);
-        
-        // 释放互斥锁
-        lvgl_port_unlock();
+        ui_ar_glass_init(); // 这里调用我们在 ui_ar_glass.c 里写的界面初始化函数
+        ui_menu_screen_init(); // 初始化菜单界面
+        ui_novel_screen_init();
+        lv_scr_load(ui_novel_screen);
+        lvgl_port_unlock(); // 别忘了解锁，否则屏幕不刷新
+
     }
     // 5. 初始化硬件 I2C 总线
     ESP_ERROR_CHECK(i2c_master_init());
@@ -178,13 +176,23 @@ void app_main(void) {
     esp_websocket_client_start(ws_client);
     app_mqtt_start();
     // 10. 创建传感器读取任务
-    // ⚠️ 注意：前提是你已经在其他文件实现了 read_mpu6050_task，否则编译会报找不到该函数
+    // ⚠️ 注意：前提是你已经在其他文件实现了 read_mpu6050_task，否则编译会报错找不到该函数
     xTaskCreate(read_mpu6050_task, "read_mpu6050_task", 4096, NULL, 5, NULL);
     xTaskCreate(read_max30105_task, "read_max30105_task", 4096, NULL, 6, NULL);
     
     // 11. 主循环挂起
     while (1) {
         app_mqtt_publish("home/status/sensor", "TEMP:25C");
+        if (lvgl_port_lock(0))
+        {
+            // 获取当前选中的索引
+            uint16_t cur_opt = lv_roller_get_selected(menu_roller);
+            // 往下滚一项 (带动画)
+            lv_roller_set_selected(menu_roller, (cur_opt + 1)%4, LV_ANIM_ON);
+            
+            lvgl_port_unlock();
+        }
+        novel_scroll_one_line();
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
