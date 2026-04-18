@@ -9,6 +9,7 @@
 // 引入自己的头文件
 #include "sd_card_app.h"
 
+#include "tts_app.h"        // ✨ 加上这行，引入你的发声引擎
 
 static const char *TAG = "SD_APP";
 
@@ -119,12 +120,28 @@ void test_sd_card_read_write(void) {
     fclose(f);
 }
 
-
+// 终极版文本净化器：杀尽英文与隐形控制符
+void clean_text_for_tts(char *str) {
+    char *src = str, *dst = str;
+    while (*src) {
+        // 过滤条件：
+        // 1. 大小写英文字母 (防止 long 等拼音报错)
+        // 2. ASCII 码小于 32 的所有控制字符 (包括 \r 回车, \n 换行, \t 制表符等)
+        if ((*src >= 'a' && *src <= 'z') || 
+            (*src >= 'A' && *src <= 'Z') || 
+            (*src > 0 && *src < 32)) {  
+            src++; // 遇到这些毒药，直接跳过
+        } else {
+            *dst++ = *src++; // 合法的中文和全角标点，放行
+        }
+    }
+    *dst = '\0'; // 重新封口
+}
 // ==========================================
 // 💡 修改这里：将读取块大小设定为 1024 字节 (1KB)
 // 这刚好能保证覆盖甚至略微超出“两个完整屏幕”的中文字数
 // ==========================================
-#define READ_CHUNK_SIZE 1024 
+#define READ_CHUNK_SIZE 128 
 #define NOVEL_FILE_PATH MOUNT_POINT"/novel.txt"
 
 // ✨ 全局书签：记录在 SD 卡文件中的绝对字节位置
@@ -176,9 +193,10 @@ void test_read_novel_next_chunk(void) {
     current_file_offset += valid_len; // 书签加上这次有效读取的字节数
     
     fclose(f);
-
+    clean_text_for_tts(read_buffer);
     // 5. 【展示结果】：打印到串口
     ESP_LOGI("SD_READ", "--- 当前书签: %lu ---", current_file_offset);
     printf("%s\n\n", read_buffer); 
     send_novel_chunk_via_mqtt(mqtt_client, read_buffer);
+    tts_speak(read_buffer);
 }

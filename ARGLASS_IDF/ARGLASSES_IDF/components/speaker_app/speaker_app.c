@@ -37,5 +37,5 @@ void initSpeaker(void) {
 // ? 确保这个函数存在，且参数和 main.c 调用时一致
 void playSpeaker(const uint8_t *data, size_t length) {
     size_t bytes_written = 0;
-    i2s_channel_write(tx_chan, data, length, &bytes_written, portMAX_DELAY);
+    i2s_channel_write(tx_chan, data, length, &bytes_written, pdMS_TO_TICKS(1000));
 }

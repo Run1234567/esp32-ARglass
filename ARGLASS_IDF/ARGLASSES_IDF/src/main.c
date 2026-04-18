@@ -5,6 +5,16 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "esp_websocket_client.h" // ? 引入原生 WebSocket 客户端
+#include "esp_tts.h"
+#include "esp_tts_voice_xiaole.h" // 乐鑫内置的中文字库定义
+
+#include <dirent.h>
+
+// 关键：对应 CMakeLists.txt 中添加的二进制文件符号
+extern const uint8_t esp_tts_voice_data_xiaole_dat_start[] asm("_binary_esp_tts_voice_data_xiaole_dat_start");
+
+// 全局句柄，初始化一次，到处使用
+esp_tts_handle_t *tts_handle = NULL;
 
 // 引入我们的四大底层组件
 #include "wifi_app.h"
@@ -15,6 +25,7 @@
 #include "sd_card_app.h" // ? 加上这句！引入 SD 卡模块
 #include "app_mqtt.h" // ? 加上这句！引入 MQTT 模块
 #include "record_app.h" // ? 加上这句！引入录音模块
+#include "tts_app.h" // ? 加上这句！引入 TTS 模块
 static const char *TAG = "J.A.R.V.I.S";
 
 // ==========================================
@@ -147,8 +158,12 @@ void app_main(void) {
     initCamera();
     initAudio();
     initSpeaker();
-    next_page_sem = xSemaphoreCreateBinary();
+    // 2. 初始化引擎
+    init_tts_engine();
+
+    // 3. 运行业务
     
+    next_page_sem = xSemaphoreCreateBinary();
     if (next_page_sem == NULL) {
         ESP_LOGE(TAG, "致命错误：信号量创建失败，内存不足！");
         return; 
@@ -166,13 +181,20 @@ void app_main(void) {
     // 启动连接
     esp_websocket_client_start(ws_client);
     app_mqtt_start();
-
+    // tts_speak("贾维斯系统已启动，正在等待指令...");
     // 4. 开启独立线程：无情地抓取麦克风数据发给基站
-    xTaskCreate(audio_tx_task, "audio_tx_task", 8192, NULL, 5, NULL);
-    xTaskCreate(novel_read_task, "novel_task", 4096 * 2, NULL, 5, NULL);
+// 🌟 核心救命代码：强制绑定到 Core 1 (参数最后的 1) 🌟
+    
+    // 1. 麦克风采集任务：扔到核1，优先级4
+   xTaskCreatePinnedToCore(audio_tx_task, "audio_tx_task", 8192, NULL, 4, NULL, 1);
+    
+    // 2. 小说读取任务：扔到核1，优先级4
+    xTaskCreatePinnedToCore(novel_read_task, "novel_task", 4096 * 2, NULL, 4, NULL, 1);
+    
+    tts_speak("贾维斯系统已启动。主脑连接成功，正在等待指令。");
     // // 2. 愉快的业务逻辑演示
     // ESP_LOGI(TAG, "准备开始第一段录音...");
-    // vTaskDelay(pdMS_TO_TICKS(2000));
+    // 
     
     // start_record(); // 它会自动变成 REC_001.wav
     // vTaskDelay(pdMS_TO_TICKS(5000)); // 录 5 秒
