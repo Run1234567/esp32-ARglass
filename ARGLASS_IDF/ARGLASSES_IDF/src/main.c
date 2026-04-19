@@ -2,6 +2,8 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h" // ✨ 引入信号量的头文件
+
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "esp_websocket_client.h" // ? 引入原生 WebSocket 客户端
@@ -26,6 +28,7 @@ esp_tts_handle_t *tts_handle = NULL;
 #include "app_mqtt.h" // ? 加上这句！引入 MQTT 模块
 #include "record_app.h" // ? 加上这句！引入录音模块
 #include "tts_app.h" // ? 加上这句！引入 TTS 模块
+#include "music_app.h" // ? 加上这句！引入音乐播放器模块
 static const char *TAG = "J.A.R.V.I.S";
 
 // ==========================================
@@ -38,6 +41,7 @@ const char* websocket_url = "ws://124.220.224.189:8765/";
 // ==========================================
 esp_websocket_client_handle_t ws_client;
 
+SemaphoreHandle_t speaker_mutex = NULL;
 // ==========================================
 // ? 拍照并发送
 // ==========================================
@@ -140,7 +144,12 @@ void app_main(void) {
       ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
-
+    speaker_mutex = xSemaphoreCreateMutex();
+    
+    if (speaker_mutex == NULL) {
+        ESP_LOGE("MAIN", "❌ 致命错误：喇叭互斥锁创建失败！");
+        return; // 如果锁没造出来，后面的系统就别跑了
+    }
     // 调用模块暴露的接口
     if (init_sd_card() == ESP_OK) {
         test_sd_card_read_write();
@@ -196,10 +205,7 @@ void app_main(void) {
     // ESP_LOGI(TAG, "准备开始第一段录音...");
     // 
     
-    // start_record(); // 它会自动变成 REC_001.wav
-    // vTaskDelay(pdMS_TO_TICKS(5000)); // 录 5 秒
-    // stop_record();
-
+    start_music_player(MOUNT_POINT "/music1.wav"); // 从 SD 卡播放音乐
     // ESP_LOGI(TAG, "休息 3 秒钟...");
     // vTaskDelay(pdMS_TO_TICKS(1000));
     // take_photo_and_save(); // 自动保存为 IMG_002.jpg

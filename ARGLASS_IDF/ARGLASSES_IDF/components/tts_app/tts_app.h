@@ -6,7 +6,10 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+#include "freertos/semphr.h"
 
+// 3. 跨文件声明：告诉所有包含此头文件的 C 文件，有这把锁存在！
+extern SemaphoreHandle_t speaker_mutex;
 /**
  * @brief 初始化贾维斯 TTS 语音中枢系统
  * 包含：初始化同步锁、音频缓冲区，并从 SD 卡加载声学模型到 PSRAM

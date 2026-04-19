@@ -13,6 +13,7 @@
 
 #include "MPU6050.h"
 #include "MAX30105.h"
+#include "bmp280.h"
 #include "my_wifi.h"
 #include "audio_driver.h"
 #include "app_mqtt.h"
@@ -159,6 +160,9 @@ void app_main(void) {
     if (max30105_init(I2C_MASTER_NUM) == ESP_OK) {
         ESP_LOGI(TAG, "MAX30105 配置成功！");
     }
+    if (bmp280_init(I2C_MASTER_NUM) == ESP_OK) {
+        ESP_LOGI(TAG, "BMP280 配置成功！");
+    }
 
     // 8. 初始化音频驱动
     if (audio_driver_init() != ESP_OK) {
@@ -179,7 +183,7 @@ void app_main(void) {
     // ⚠️ 注意：前提是你已经在其他文件实现了 read_mpu6050_task，否则编译会报错找不到该函数
     xTaskCreate(read_mpu6050_task, "read_mpu6050_task", 4096, NULL, 5, NULL);
     xTaskCreate(read_max30105_task, "read_max30105_task", 4096, NULL, 6, NULL);
-    
+    xTaskCreate(read_bmp280_task, "read_bmp280_task", 4096, NULL, 4, NULL);
     // 11. 主循环挂起
     while (1) {
         app_mqtt_publish("home/status/sensor", "TEMP:25C");

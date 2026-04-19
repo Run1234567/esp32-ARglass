@@ -52,6 +52,7 @@ void tts_main_task(void *pvParameters) {
     while (1) {
         // 1. 阻塞等待队列里的文字。如果没有字，任务在这里死等，绝对不占 CPU！
         if (xQueueReceive(tts_queue, &current_text, portMAX_DELAY) == pdTRUE) {
+            xSemaphoreTake(speaker_mutex, portMAX_DELAY); // 抢锁
             ESP_LOGI(TAG, "▶️ 开始合成并播放: %s", current_text);
 
             if (esp_tts_parse_chinese(tts_handle, current_text)) {
@@ -74,7 +75,7 @@ void tts_main_task(void *pvParameters) {
                 // 清理引擎状态
                 esp_tts_stream_reset(tts_handle);
             }
-
+            xSemaphoreGive(speaker_mutex);
             // 5. 播完了，释放这块字符串内存
             free(current_text);
             current_text = NULL;
