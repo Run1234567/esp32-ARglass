@@ -11,13 +11,18 @@
 #include "sd_card_app.h" 
 #include "audio_app.h"
 #include "esp_camera.h"
+#include "freertos/ringbuf.h"
+
+// 引入 main.c 中创建的全局 RingBuffer 和状态
+extern RingbufHandle_t sd_ringbuf; 
+
 
 static const char *TAG = "RECORD_APP";
 
 // ==========================================
 // ⚙️ 录音状态全局控制变量
 // ==========================================
-static volatile bool is_recording = false;   
+volatile bool is_recording = false;   
 static FILE *record_file = NULL;             
 static uint32_t total_written_bytes = 0;     
 static TaskHandle_t record_task_handle = NULL; 
@@ -68,22 +73,26 @@ static void get_next_filename(char *out_filepath, size_t max_len) {
 }
 
 // ==========================================
-// 👷 内部任务：独立录音线程
+// 👷 内部任务：独立录音线程 (从 RingBuffer 接收数据)
 // ==========================================
 static void record_task_worker(void *arg) {
     const uint32_t SAMPLE_RATE = 16000;
-    const size_t BUFFER_SAMPLES = 512; 
-    int16_t audio_buffer[BUFFER_SAMPLES];
+    size_t item_size;
 
-    ESP_LOGI(TAG, "🎙️ 后台录音线程已启动，正在实时写入...");
+    ESP_LOGI(TAG, "🎙️ 后台录音线程已启动，正在等待音频流...");
 
     while (is_recording) {
-        size_t bytes_read = readAudio(audio_buffer, BUFFER_SAMPLES);
-        if (bytes_read > 0 && record_file != NULL) {
-            fwrite(audio_buffer, 1, bytes_read, record_file);
-            total_written_bytes += bytes_read;
-        } else {
-            vTaskDelay(pdMS_TO_TICKS(10)); 
+        // 从 SD 卡专属的 RingBuffer 提取数据，最多等 100ms
+        void *sd_data = xRingbufferReceive(sd_ringbuf, &item_size, pdMS_TO_TICKS(100));
+        
+        if (sd_data != NULL) {
+            if (record_file != NULL) {
+                // 收到数据，一口气写入 SD 卡
+                fwrite(sd_data, 1, item_size, record_file);
+                total_written_bytes += item_size;
+            }
+            // 务必归还内存
+            vRingbufferReturnItem(sd_ringbuf, sd_data);
         }
     }
 
