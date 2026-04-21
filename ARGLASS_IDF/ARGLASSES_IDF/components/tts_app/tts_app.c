@@ -95,7 +95,8 @@ void init_tts_engine() {
     if (load_tts_model_from_sd(MOUNT_POINT "/TTS_MO~1.DAT") != ESP_OK) return;
 
     // C. 初始化乐鑫引擎
-    esp_tts_voice_t *voice = esp_tts_voice_set_init(&esp_tts_voice_xiaole, (const int16_t *)model_data_in_psram);
+    // C. 初始化乐鑫引擎
+    esp_tts_voice_t *voice = esp_tts_voice_set_init(&esp_tts_voice_xiaole, (void *)model_data_in_psram);
     tts_handle = esp_tts_create(voice);
     
     if (tts_handle == NULL) {

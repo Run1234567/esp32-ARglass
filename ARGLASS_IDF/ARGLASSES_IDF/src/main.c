@@ -32,11 +32,12 @@ esp_tts_handle_t *tts_handle = NULL;
 // ✨ 引入环形缓冲区和数学库
 #include "freertos/ringbuf.h" 
 #include <math.h>
-
+#include "voice_app.h" // ✨ 新增：引入你的 AI 语音大脑头文件
 // 全局音频分发缓冲区
 RingbufHandle_t ws_ringbuf = NULL;
 RingbufHandle_t sd_ringbuf = NULL;
 RingbufHandle_t yin_ringbuf = NULL; // ✨ 新增：专为测音调准备的缓冲池
+RingbufHandle_t sr_ringbuf = NULL; // ✨ 新增：AI 语音识别专属缓冲池
 static const char *TAG = "J.A.R.V.I.S";
 
 // ==========================================
@@ -177,7 +178,7 @@ void audio_hub_task(void *pvParameters) {
         if (bytesRead > 0) {
             // 1. 算噪音
             float db_value = calculate_decibel(audioBuffer, samples);
-            ESP_LOGI("NOISE", "当前环境噪音: %.1f dB SPL", db_value);
+            // ESP_LOGI("NOISE", "当前环境噪音: %.1f dB SPL", db_value);
             // 2. 发给 WebSocket
             if (ws_ringbuf != NULL && esp_websocket_client_is_connected(ws_client)) {
                 xRingbufferSend(ws_ringbuf, audioBuffer, bytesRead, 0); 
@@ -195,6 +196,11 @@ void audio_hub_task(void *pvParameters) {
                 // 等待时间设为 0。如果 YIN 任务算得太慢导致池子满了，
                 // Hub 会直接丢弃这帧数据，绝不卡死自己！
                 xRingbufferSend(yin_ringbuf, audioBuffer, bytesRead, 0);
+            }
+            // ✨ 4. 无情地把声音灌给 AI 引擎
+            if (sr_ringbuf != NULL) {
+                // 等待时间设为 0。AI 处理不过来自动丢弃，绝不卡死 Hub
+                xRingbufferSend(sr_ringbuf, audioBuffer, bytesRead, 0); 
             }
         }
     }
@@ -306,12 +312,12 @@ void yin_pitch_task(void *pvParameters) {
                 float exact_freq = calculate_pitch_yin(accum_buffer, target_samples, 16000);
                 
                 if (exact_freq > 20.0f) {
-                    ESP_LOGI("PITCH_RESULT", "🔥 抓到声音了！当前主频率: %.2f Hz", exact_freq);
+                    //ESP_LOGI("PITCH_RESULT", "🔥 抓到声音了！当前主频率: %.2f Hz", exact_freq);
                     print_pitch_from_freq(exact_freq); 
                 }
                 else {
                     // 如果环境全是呼呼的风声底噪，YIN 算法会返回 0，这句一定会打印！
-                    ESP_LOGW("PITCH_RESULT", "🤔 声音杂乱无固定周期 (非乐音)");
+                    // ESP_LOGW("PITCH_RESULT", "🤔 声音杂乱无固定周期 (非乐音)");
                 }
                 
                 // 清空水池，准备攒下一波
@@ -349,6 +355,7 @@ void app_main(void) {
     ws_ringbuf = xRingbufferCreate(10240, RINGBUF_TYPE_NOSPLIT);
     sd_ringbuf = xRingbufferCreate(10240, RINGBUF_TYPE_NOSPLIT);
     yin_ringbuf = xRingbufferCreate(8192, RINGBUF_TYPE_NOSPLIT);
+    sr_ringbuf = xRingbufferCreate(16384, RINGBUF_TYPE_NOSPLIT);
     if (ws_ringbuf == NULL || sd_ringbuf == NULL) {
         ESP_LOGE(TAG, "❌ 致命错误：音频环形缓冲区创建失败！");
         return;
@@ -365,8 +372,8 @@ void app_main(void) {
     initAudio();
     initSpeaker();
     // 2. 初始化引擎
-    init_tts_engine();
-
+   // init_tts_engine();
+    start_jarvis_brain();
     // 3. 运行业务
     
     next_page_sem = xSemaphoreCreateBinary();
@@ -405,7 +412,7 @@ void app_main(void) {
     // ESP_LOGI(TAG, "准备开始第一段录音...");
     // 
     
-    start_music_player(MOUNT_POINT "/music1.wav"); // 从 SD 卡播放音乐
+    //start_music_player(MOUNT_POINT "/music1.wav"); // 从 SD 卡播放音乐
     // ESP_LOGI(TAG, "休息 3 秒钟...");
     // vTaskDelay(pdMS_TO_TICKS(1000));
     // take_photo_and_save(); // 自动保存为 IMG_002.jpg
