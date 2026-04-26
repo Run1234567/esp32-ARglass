@@ -6,39 +6,29 @@
 #include "freertos/ringbuf.h"
 #include "esp_log.h"
 
-// 乐鑫 ESP-SR 核心库 (唤醒词 WakeNet)
+// 乐鑫 ESP-SR 核心库 (只保留唤醒和降噪相关)
 #include "esp_wn_iface.h"
 #include "esp_wn_models.h"
 #include "esp_afe_sr_iface.h"
 #include "esp_afe_sr_models.h"
 
-// ✨ 新增：乐鑫 ESP-SR 命令词识别库 (MultiNet)
-#include "esp_mn_iface.h"
-#include "esp_mn_models.h"
-#include "esp_mn_speech_commands.h" // ✨ 新增：V2.0+ 命令词管理专用头文件
-#include "tts_app.h" 
+// 注意：已经彻底删除了所有 esp_mn_xxx (MultiNet) 的头文件
 
 static const char *TAG = "VOICE_APP";
-static char *mn_model_name = NULL; // 记住命令模型的名字
+
 extern RingbufHandle_t sr_ringbuf;
 extern srmodel_list_t *esp_srmodel_init(const char *partition_label);
 
 // ==========================================
-// 全局句柄与状态标志
+// 全局句柄
 // ==========================================
-// 1. AFE 降噪与唤醒句柄
 static esp_afe_sr_iface_t *afe_handle = NULL;
 static esp_afe_sr_data_t *afe_data = NULL;
-
-// 2. ✨ 新增：MultiNet 命令识别句柄
-static esp_mn_iface_t *multinet_handle = NULL;
-static model_iface_data_t *multinet_data = NULL;
-
-// 3. 状态机标志：当前是在等唤醒，还是在听命令？
-static bool is_listening_command = false; 
+// 彻底删除了 MultiNet 的句柄和状态变量
 
 // ==========================================
 // 数据搬运工：从 Ringbuf 捞水，放大后喂给 AFE
+// (保留了你之前的 x4 软件放大器，这对麦克风极其重要！)
 // ==========================================
 static void feed_audio_task(void *arg) {
     int chunk_size = afe_handle->get_feed_chunksize(afe_data); 
@@ -47,9 +37,8 @@ static void feed_audio_task(void *arg) {
     int16_t *feed_buffer = malloc(chunk_bytes);
     size_t current_bytes_in_buffer = 0;
     size_t item_size = 0;
-    int packet_count = 0;
 
-    ESP_LOGI(TAG, "🎙️ AI 听觉搬运工已就绪，每次吞吐量: %d 采样点", chunk_size);
+    ESP_LOGI(TAG, "🎙️ 纯净版唤醒搬运工已就绪...");
 
     while (1) {
         void *audio_data = xRingbufferReceive(sr_ringbuf, &item_size, portMAX_DELAY);
@@ -68,111 +57,54 @@ static void feed_audio_task(void *arg) {
                 bytes_left_to_process -= copy_size;
 
                 if (current_bytes_in_buffer >= chunk_bytes) {
-                    
-                    // ✨ 核心修复：软件音频放大器 (放大 4 倍，解决声音小不识别的问题)
+                    // 音频 x4 放大器
                     for (int i = 0; i < chunk_size; i++) {
                         int32_t sample = feed_buffer[i] * 4; 
-                        // 防止爆音截断
                         if (sample > 32767) sample = 32767;
                         if (sample < -32768) sample = -32768;
                         feed_buffer[i] = (int16_t)sample;
                     }
 
-                    // 放大后喂给引擎
+                    // 喂给 AFE 降噪和唤醒引擎
                     afe_handle->feed(afe_data, feed_buffer);
                     current_bytes_in_buffer = 0; 
-                    
-                    if (++packet_count % 100 == 0) {
-                        ESP_LOGD(TAG, "📥 已向 AFE 引擎输送 %d 帧音频", packet_count);
-                    }
                 }
             }
             vRingbufferReturnItem(sr_ringbuf, audio_data);
         }
     }
 }
+
 // ==========================================
-// 识别任务：动态时分复用的双核状态机
+// 识别任务：极简的 WakeNet 监听循环
 // ==========================================
 static void detect_task(void *arg) {
-    ESP_LOGI(TAG, "🧠 AI 唤醒引擎正在监听 (极低内存模式)...");
+    ESP_LOGI(TAG, "🧠 AI 唤醒引擎正在监听 (内存自由模式)...");
     
     while (1) {
+        // 从 AFE 获取处理结果
         afe_fetch_result_t* res = afe_handle->fetch(afe_data); 
         if (!res || res->ret_value == ESP_FAIL) continue;
 
-        // =====================================
-        // 状态 1：日常待命，等待“贾维斯”唤醒
-        // =====================================
-        if (!is_listening_command) {
-            if (res->wakeup_state == WAKENET_DETECTED) {
-                ESP_LOGI(TAG, "🚀 [成功] 识别到唤醒词：贾维斯！");
-                
-                // ✨ 核心内存魔术：被唤醒后，动态向 PSRAM 申请 2.5MB 内存加载理解大脑
-                ESP_LOGI(TAG, "🔄 正在动态加载命令中枢，分配内存...");
-                
-                // 6000 代表留给用户 6 秒的时间说出命令
-                multinet_data = multinet_handle->create(mn_model_name, 6000); 
-                
-                if (multinet_data != NULL) {
-                    // 内存分配成功，开始注入指令
-                    esp_mn_commands_clear();
-                    esp_mn_commands_add(1, (char *)"da kai xian shi");
-                    esp_mn_commands_add(2, (char *)"guan bi xian shi");
-                    esp_mn_commands_add(3, (char *)"jin ru xiu mian");
-                    esp_mn_commands_add(3, (char *)"jin ru xing xiu"); // 容错发音
-                    esp_mn_commands_update();
-
-                    is_listening_command = true; // 切换到命令倾听状态
-                    ESP_LOGI(TAG, "👂 请在 6 秒内下达指令...");
-                } else {
-                    // 内存如果还是不够，优雅地报错，但不死机！
-                    ESP_LOGE(TAG, "❌ 内存不足 (OOM)！命令大脑加载失败！");
-                }
-            }
-        } 
-        // =====================================
-        // 状态 2：已唤醒，正在倾听并匹配拼音命令
-        // =====================================
-        else {
-            esp_mn_state_t mn_state = multinet_handle->detect(multinet_data, res->data);
-
-            if (mn_state == ESP_MN_STATE_DETECTED || mn_state == ESP_MN_STATE_TIMEOUT) {
-                
-                if (mn_state == ESP_MN_STATE_DETECTED) {
-                    esp_mn_results_t *mn_result = multinet_handle->get_results(multinet_data);
-                    int command_id = mn_result->command_id[0];
-                    ESP_LOGI(TAG, "🎯 识别到命令！ID: %d", command_id);
-                    
-                    // --- 在这里执行对应的动作 ---
-                    switch (command_id) {
-                        case 1: ESP_LOGI(TAG, "📺 执行: 打开显示"); break;
-                        case 2: ESP_LOGI(TAG, "📺 执行: 关闭显示"); break;
-                        case 3: ESP_LOGI(TAG, "💤 执行: 系统休眠"); break;
-                        default: break;
-                    }
-                    
-                } else {
-                    ESP_LOGW(TAG, "⏱️ 倾听超时，未听到有效指令。");
-                }
-                
-                // ✨ 核心内存魔术：用完立刻销毁，把 2.5MB 内存还给系统！
-                ESP_LOGI(TAG, "🧹 销毁命令大脑，释放内存...");
-                multinet_handle->destroy(multinet_data);
-                multinet_data = NULL; // 清空指针，防止野指针崩溃
-                
-                is_listening_command = false; // 恢复待命
-                ESP_LOGI(TAG, "🧠 恢复安静监听模式。");
-            }
+        // 如果检测到唤醒词
+        if (res->wakeup_state == WAKENET_DETECTED) {
+            ESP_LOGI(TAG, "=================================");
+            ESP_LOGI(TAG, "🚀 [成功] 识别到唤醒词：贾维斯！");
+            ESP_LOGI(TAG, "=================================");
+            
+            // 💡 这里就是你未来大展拳脚的地方！
+            // TODO 1: 播放一个滴答声，或者 AR 屏幕闪烁一下，提示用户“我在听”
+            // TODO 2: 开启 WebSocket，把接下来的麦克风 PCM 数据发送给你的服务器
+            // TODO 3: 接收服务器返回的识别结果
         }
     }
 }
 
 // ==========================================
-// 外部调用：启动整个语音大脑
+// 外部调用：启动纯净唤醒大脑
 // ==========================================
 void start_jarvis_brain(void) {
-    ESP_LOGI(TAG, "正在启动 AI 语音双核引擎 (动态加载架构)...");
+    ESP_LOGI(TAG, "正在启动 AI 唤醒引擎 (仅 WakeNet)...");
 
     // 1. 初始化模型列表
     srmodel_list_t *models = esp_srmodel_init("model");
@@ -181,39 +113,32 @@ void start_jarvis_brain(void) {
         return;
     }
 
-    // 2. 加载 WakeNet 唤醒词模型 (常驻内存)
+    // 2. 加载 WakeNet 唤醒词模型
     char *wn_name = esp_srmodel_filter(models, ESP_WN_PREFIX, NULL); 
     if (wn_name == NULL) {
         ESP_LOGE(TAG, "❌ 分区内未找到 WakeNet 唤醒模型！");
         return;
     }
-    ESP_LOGI(TAG, "🔍 加载常驻唤醒模型: %s", wn_name);
+    ESP_LOGI(TAG, "🔍 成功加载唤醒模型: %s", wn_name);
 
-    // 3. 寻找 MultiNet 命令词模型 (不立即加载，只记下名字)
-    mn_model_name = esp_srmodel_filter(models, ESP_MN_CHINESE, NULL); 
-    if (mn_model_name == NULL) {
-        ESP_LOGE(TAG, "❌ 分区内未找到 MultiNet 命令模型！");
-        return;
-    }
-    ESP_LOGI(TAG, "🔍 找到命令模型: %s (设为动态加载)", mn_model_name);
+    // (彻底移除了加载 MultiNet 的代码)
 
-    // ✨ 初始化 MultiNet 接口句柄 (只搭框架，不占大内存)
-    multinet_handle = esp_mn_handle_from_name(mn_model_name);
-
-    // 4. 初始化 AFE (音频前端降噪)
+    // 3. 初始化 AFE (音频前端)
     afe_config_t *afe_config = afe_config_init("M", models, AFE_TYPE_SR, AFE_MODE_HIGH_PERF);
     afe_config->wakenet_model_name = wn_name; 
-    afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_INTERNAL;
+    
+    // 既然我们去掉了 MultiNet，PSRAM 极度宽裕，这里用回默认配置即可
+    afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM; 
 
     afe_handle = (esp_afe_sr_iface_t *)esp_afe_handle_from_config(afe_config);
     afe_data = afe_handle->create_from_config(afe_config);
     
-    // 唤醒门槛调至 0.1，配合 x4 放大器，对中文口音极致友好
+    // 门槛调低至 0.1，对口音极其友好
     afe_handle->set_wakenet_threshold(afe_data, 1, 0.1); 
 
-    // 5. 启动双核驱动任务
+    // 4. 启动任务
     xTaskCreatePinnedToCore(feed_audio_task, "voice_feed", 8192, NULL, 5, NULL, 0);
     xTaskCreatePinnedToCore(detect_task,   "voice_detect", 8192, NULL, 5, NULL, 0);
     
-    ESP_LOGI(TAG, "✅ 语音双核大脑启动完毕！(内存安全模式)");
+    ESP_LOGI(TAG, "✅ 唤醒引擎启动完毕！系统内存现在极度安全。");
 }

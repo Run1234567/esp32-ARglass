@@ -17,7 +17,7 @@
 #include "my_wifi.h"
 #include "audio_driver.h"
 #include "app_mqtt.h"
-
+#include "my_ble.h" // 引入我们刚才写的蓝牙模块头文件
 
 #include "ui_ar_glass.h"
 #include "ui_menu_screen.h"
@@ -115,7 +115,7 @@ void app_main(void) {
       ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
-
+    my_ble_init("My_Smart_JARVIS");
     ESP_LOGI(TAG, "1. 启动物理屏幕驱动...");
     lcd_init();
     
