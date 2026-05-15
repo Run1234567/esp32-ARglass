@@ -187,16 +187,28 @@ void app_main(void) {
     // 11. 主循环挂起
     while (1) {
         app_mqtt_publish("home/status/sensor", "TEMP:25C");
-        if (lvgl_port_lock(0))
-        {
-            // 获取当前选中的索引
-            uint16_t cur_opt = lv_roller_get_selected(menu_roller);
-            // 往下滚一项 (带动画)
-            lv_roller_set_selected(menu_roller, (cur_opt + 1)%4, LV_ANIM_ON);
-            
-            lvgl_port_unlock();
+        if (my_ble_send_data("Hello from JARVIS!")) {
+            ESP_LOGI(TAG, "蓝牙数据发送成功!");
         }
-        novel_scroll_one_line();
+        // if (lvgl_port_lock(0))
+        // {
+        //     // 获取当前选中的索引
+        //     uint16_t cur_opt = lv_roller_get_selected(menu_roller);
+        //     // 往下滚一项 (带动画)
+        //     lv_roller_set_selected(menu_roller, (cur_opt + 1)%4, LV_ANIM_ON);
+            
+        //     lvgl_port_unlock();
+        // }
+        // novel_scroll_one_line();
+        // 示例 1：向左滑动进入【主菜单】
+// 参数 false 非常重要！它表示不要删除旧屏幕，因为你的屏幕是全局复用的。
+lv_scr_load_anim(ui_menu_screen, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+ vTaskDelay(pdMS_TO_TICKS(1000));
+// 示例 2：向右滑动返回【主页】
+lv_scr_load_anim(ui_main_screen, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 300, 0, false);
+ vTaskDelay(pdMS_TO_TICKS(1000));
+// 示例 3：淡入淡出进入【小说界面】
+lv_scr_load_anim(ui_novel_screen, LV_SCR_LOAD_ANIM_FADE_ON, 500, 0, false);
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }

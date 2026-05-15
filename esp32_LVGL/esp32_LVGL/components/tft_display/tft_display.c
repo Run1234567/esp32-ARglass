@@ -14,11 +14,11 @@ static const char *TAG = "TFT_DISPLAY";
 // ==================== 屏幕引脚与参数配置 ====================
 // 请根据你的实际接线修改这里的引脚号
 #define LCD_HOST       SPI2_HOST
-#define PIN_NUM_SCLK   12  // SPI 时钟引脚
+#define PIN_NUM_SCLK   12  // SPI 时钟引脚 SCL
 #define PIN_NUM_MOSI   11  // SPI 数据引脚 (SDA)
 #define PIN_NUM_MISO   -1  // 屏幕通常不需要 MISO，设为 -1
-#define PIN_NUM_CS     10  // 片选引脚
-#define PIN_NUM_DC     9   // 数据/命令控制引脚 (RS/DC)
+#define PIN_NUM_CS     10  // 片选引脚 CS
+#define PIN_NUM_DC     9   // 数据/命令控制引脚 DC
 #define PIN_NUM_RST    8   // 复位引脚 (RES)
 
 #define LCD_H_RES      240 // 屏幕水平分辨率
