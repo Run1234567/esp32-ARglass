@@ -7,11 +7,12 @@
 #include "nimble/nimble_port_freertos.h"
 #include "host/ble_hs.h"
 #include "services/gap/ble_svc_gap.h"
+#include "ui_manager.h" // 引入 UI 管理器
 
 static const char *TAG = "BLE_CLIENT";
 
 // 目标服务器的名字 (必须和板子A的名字完全一样)
-#define TARGET_DEVICE_NAME "My_S3_Bluetooth"
+#define TARGET_DEVICE_NAME "Cyberry_Wand"
 
 // 记录连接句柄和信箱句柄
 static uint16_t peer_conn_handle = BLE_HS_CONN_HANDLE_NONE;
@@ -19,6 +20,11 @@ static uint16_t peer_chr_val_handle = 0; // 0x2222 信箱的实际操作句柄
 static bool is_connected = false;
 
 static void blecent_scan(void);
+
+int8_t Key_Down_Flag = 0; // 下
+int8_t Key_Up_Flag = 0;   // 上
+int8_t Key_Confirm_Flag = 0; // 0: 没按，1: 确认
+int8_t Key_Return_Flag = 0;  // 0: 没按，1: 返回
 
 // =======================================================
 // 4. 发送数据 API (供 main.c 调用)
@@ -45,20 +51,17 @@ static int chr_disc_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
         // 找到了信箱！记录下它的操作句柄
         peer_chr_val_handle = chr->val_handle;
         is_connected = true;
-        ESP_LOGI(TAG, "🎯 成功找到 0x2222 信箱！现在可以发送数据了！");
+        ESP_LOGI(TAG, "? 成功找到 0x2222 信箱！现在可以发送数据了！");
     }
     return 0;
 }
 
-// =======================================================
-// 2. 寻找大楼的回调 (发现 0x1111)
-// =======================================================
 static int svc_disc_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
                        const struct ble_gatt_svc *service, void *arg) {
     if (error->status == 0) {
-        ESP_LOGI(TAG, "🏢 找到 0x1111 服务大楼，正在寻找 0x2222 信箱...");
-        // 拿着大楼的范围，进去找 0x2222 信箱
-        ble_uuid16_t chr_uuid = { .u.type = BLE_UUID_TYPE_16, .value = 0x2222 };
+        ESP_LOGI(TAG, "? 找到 0x1111 服务大楼，正在寻找 0x3333 信箱...");
+        // 拿着大楼的范围，进去找 0x3333 信箱
+        ble_uuid16_t chr_uuid = { .u.type = BLE_UUID_TYPE_16, .value = 0x3333 };
         ble_gattc_disc_chrs_by_uuid(conn_handle, service->start_handle, service->end_handle, 
                                     &chr_uuid.u, chr_disc_cb, NULL);
     }
@@ -78,7 +81,7 @@ static int blecent_gap_event(struct ble_gap_event *event, void *arg) {
             // 检查是不是我们要找的板子A
             if (fields.name != NULL && fields.name_len == strlen(TARGET_DEVICE_NAME)) {
                 if (strncmp((char*)fields.name, TARGET_DEVICE_NAME, fields.name_len) == 0) {
-                    ESP_LOGI(TAG, "👀 发现目标！停止扫描，准备连接...");
+                    ESP_LOGI(TAG, "? 发现目标！停止扫描，准备连接...");
                     ble_gap_disc_cancel(); // 停止扫描
                     // 发起连接
                     ble_gap_connect(BLE_OWN_ADDR_PUBLIC, &event->disc.addr, 30000, NULL, blecent_gap_event, NULL);
@@ -90,14 +93,14 @@ static int blecent_gap_event(struct ble_gap_event *event, void *arg) {
         // --- 连接成功或失败 ---
         case BLE_GAP_EVENT_CONNECT: {
             if (event->connect.status == 0) {
-                ESP_LOGI(TAG, "🔗 物理连接成功！正在寻找服务...");
+                ESP_LOGI(TAG, "? 物理连接成功！正在寻找服务...");
                 peer_conn_handle = event->connect.conn_handle;
                 
                 // 连接成功后，马上去寻找 0x1111 大楼
                 ble_uuid16_t svc_uuid = { .u.type = BLE_UUID_TYPE_16, .value = 0x1111 };
                 ble_gattc_disc_svc_by_uuid(peer_conn_handle, &svc_uuid.u, svc_disc_cb, NULL);
             } else {
-                ESP_LOGE(TAG, "❌ 连接失败，重新开始扫描...");
+                ESP_LOGE(TAG, "? 连接失败，重新开始扫描...");
                 blecent_scan();
             }
             break;
@@ -105,25 +108,48 @@ static int blecent_gap_event(struct ble_gap_event *event, void *arg) {
 
         // --- 连接断开 ---
         case BLE_GAP_EVENT_DISCONNECT: {
-            ESP_LOGW(TAG, "🥀 连接断开，重新开始扫描...");
+            ESP_LOGW(TAG, "? 连接断开，重新开始扫描...");
             peer_conn_handle = BLE_HS_CONN_HANDLE_NONE;
             peer_chr_val_handle = 0;
             is_connected = false;
             blecent_scan();
             break;
         }
-        // --- 【新增】收到 Server 发来的通知 (Notify) ---
+        // --- 【修改 3】收到 Server 发来的通知 (Notify) 并在屏幕响应 ---
         case BLE_GAP_EVENT_NOTIFY_RX: {
             uint16_t len = OS_MBUF_PKTLEN(event->notify_rx.om);
             if (len > 0) {
+                // 安全提取字符串
                 uint8_t received_data[len + 1];
                 os_mbuf_copydata(event->notify_rx.om, 0, len, received_data);
                 received_data[len] = '\0';
                 
-                // 打印出收到的消息！
-                ESP_LOGI(TAG, "🔔 收到 Server 发来的消息: %s", received_data);
+                ESP_LOGI(TAG, "? 收到魔杖指令: %s", received_data);
                 
-                // TODO: 这里可以把你收到的数据发给你的屏幕(LVGL)显示，或者控制灯光
+                ui_cmd_t cmd = UI_CMD_NONE;
+
+                // 根据收到的字符串，映射到 UI 指令并发送到队列
+                if (strstr((char*)received_data, "SwipeUp") != NULL) {
+                    ESP_LOGI(TAG, "? 执行: 菜单向上");
+                    cmd = UI_CMD_UP;
+                } 
+                else if (strstr((char*)received_data, "SwipeDown") != NULL) {
+                    ESP_LOGI(TAG, "? 执行: 菜单向下");
+                    cmd = UI_CMD_DOWN;
+                }
+                else if (strstr((char*)received_data, "SwipeRight") != NULL) {
+                    ESP_LOGI(TAG, "? 执行: 确认/进入");
+                    cmd = UI_CMD_RIGHT;
+                }
+                else if (strstr((char*)received_data, "SwipeLeft") != NULL) {
+                    ESP_LOGI(TAG, "? 执行: 返回/退出");
+                    cmd = UI_CMD_LEFT;
+                }
+
+                if (cmd != UI_CMD_NONE && ui_cmd_queue != NULL) {
+                    xQueueSend(ui_cmd_queue, &cmd, 0); // 发送到 UI 队列
+                }
+
             }
             break;
         }
@@ -141,7 +167,7 @@ static void blecent_scan(void) {
     disc_params.window = 0;
     
     ble_gap_disc(BLE_OWN_ADDR_PUBLIC, BLE_HS_FOREVER, &disc_params, blecent_gap_event, NULL);
-    ESP_LOGI(TAG, "🕵️‍♂️ 开始扫描附近的设备...");
+    ESP_LOGI(TAG, "???♂? 开始扫描附近的设备...");
 }
 
 static void blecent_on_sync(void) {

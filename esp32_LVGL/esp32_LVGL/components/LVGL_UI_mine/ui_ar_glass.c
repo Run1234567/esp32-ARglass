@@ -1,12 +1,18 @@
 #include "ui_ar_glass.h"
 #include "ui_globals.h" // 引入全局变量
+
+#include <time.h>
+#include "esp_lvgl_port.h"
+
+
+
 // 引入你的中文字库
 LV_FONT_DECLARE(my_font_cn_16);
 
 // =========================================================
-// 🌍 全局变量定义 
+// ? 全局变量定义 
 // =========================================================
-// ✨ 新增：定义一个代表“主页面”的全局对象，方便以后来回切换
+// ? 新增：定义一个代表“主页面”的全局对象，方便以后来回切换
 lv_obj_t * ui_main_screen;  
 
 lv_obj_t * label_time;      // 时间标签
@@ -17,10 +23,10 @@ lv_obj_t * label_batt_pct;  // 电量数字标签
 lv_obj_t * icon_batt;       // 电池图标标签
 
 // =========================================================
-// 🚀 主界面初始化函数
+// ? 主界面初始化函数
 // =========================================================
 void ui_ar_glass_init(void) {
-    // ✨ 修改 1：不要再用 lv_scr_act() 了！
+    // ? 修改 1：不要再用 lv_scr_act() 了！
     // 创建一个全新的、干净的后台屏幕对象
     ui_main_screen = lv_obj_create(NULL); 
     
@@ -36,7 +42,7 @@ void ui_ar_glass_init(void) {
 
     // -----------------------------------------------------
     // A. 上方：农历信息
-    // ✨ 修改 2：所有的父对象都要改成 ui_main_screen (后面同理)
+    // ? 修改 2：所有的父对象都要改成 ui_main_screen (后面同理)
     // -----------------------------------------------------
     label_lunar = lv_label_create(ui_main_screen); 
     lv_obj_add_style(label_lunar, &style_common, 0);
@@ -99,7 +105,39 @@ void ui_ar_glass_init(void) {
     icon_batt = lv_label_create(battery_cont);
     lv_obj_set_style_text_color(icon_batt, lv_color_hex(0x00FF00), 0);
     lv_label_set_text(icon_batt, LV_SYMBOL_BATTERY_FULL); 
+}
 
-    // ✨ 修改 3：所有东西画完后，把这个主屏幕加载显示出来
-    lv_scr_load(ui_main_screen);
+// =========================================================
+// ⏱️ 时间与 UI 刷新守护任务
+// =========================================================
+void ui_time_update_task(void *pvParameters) {
+    while (1) {
+        time_t now;
+        struct tm timeinfo;
+        
+        // 获取当前系统时间
+        time(&now);
+        localtime_r(&now, &timeinfo);
+
+        // 判断时间是否已经同步成功 (年份大于 1970 代表同步成功)
+        if (timeinfo.tm_year > (2020 - 1900)) {
+            char time_str[16];
+            char date_str[16];
+            
+            // 格式化时间为 "HH:MM" (例如 14:30)
+            strftime(time_str, sizeof(time_str), "%H:%M", &timeinfo);
+            // 格式化日期为 "MM/DD" (例如 05/20)
+            strftime(date_str, sizeof(date_str), "%m/%d", &timeinfo);
+
+            // ⚠️ 极其重要：操作 LVGL 必须加锁！
+            if (lvgl_port_lock(0)) {
+                lv_label_set_text(label_time, time_str);
+                lv_label_set_text(label_date, date_str);
+                lvgl_port_unlock();
+            }
+        }
+        
+        // 每 1 秒钟刷新一次就够了，非常省电
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
 }

@@ -10,6 +10,10 @@
 #include "lvgl.h"
 #include "esp_lvgl_port.h"
 #include "math.h" // 引入数学库，后面会用到正弦函数来生成测试音频数据
+#include <time.h>
+#include <sys/time.h>
+#include "esp_sntp.h"
+
 
 #include "MPU6050.h"
 #include "MAX30105.h"
@@ -23,7 +27,7 @@
 #include "ui_menu_screen.h"
 #include "ui_globals.h" // 引入全局变量枢纽
 #include "ui_novel_screen.h" // 引入小说屏幕的头文件，里面有初始化函数声明
-
+#include "ui_manager.h"
 
 
 // ==========================================
@@ -64,6 +68,50 @@ static esp_err_t i2c_master_init(void) {
     if (err != ESP_OK) return err;
     
     return i2c_driver_install(I2C_MASTER_NUM, conf.mode, 0, 0, 0);
+}
+
+
+// =========================================================
+// ⏰ 设置断网情况下的默认开机时间
+// =========================================================
+void set_default_time(void) {
+    // 1. 先设置好时区，保证我们设定的 12:00 是北京时间的 12:00
+    setenv("TZ", "CST-8", 1);
+    tzset();
+
+    // 2. 构造 2026年1月1日 12:00:00 的时间结构体
+    struct tm tm_default = {0};
+    tm_default.tm_year = 2026 - 1900; // C语言标准：年份从 1900 算起
+    tm_default.tm_mon  = 1 - 1;       // C语言标准：月份是 0 到 11
+    tm_default.tm_mday = 1;           // 1日
+    tm_default.tm_hour = 12;          // 12点
+    tm_default.tm_min  = 0;           // 0分
+    tm_default.tm_sec  = 0;           // 0秒
+
+    // 3. 将结构体转换为时间戳
+    time_t t = mktime(&tm_default);
+
+    // 4. 强行写入 ESP32 的底层系统时钟
+    struct timeval now = { .tv_sec = t, .tv_usec = 0 };
+    settimeofday(&now, NULL);
+    
+    ESP_LOGI("TIME", "⏰ 无网默认开机时间已设置为 2026-01-01 12:00:00");
+}
+// =========================================================
+// ⏱️ 初始化网络时间同步
+// =========================================================
+void time_sync_init(void) {
+    ESP_LOGI("TIME", "正在初始化 SNTP 时间同步...");
+    
+    // 设置时区为中国标准时间 (UTC+8)
+    setenv("TZ", "CST-8", 1);
+    tzset();
+
+    // 配置 NTP 服务器
+    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, "pool.ntp.org");    // 国际公共 NTP
+    esp_sntp_setservername(1, "ntp.aliyun.com");  // 阿里云 NTP (国内备用，速度快)
+    esp_sntp_init();
 }
 
 
@@ -136,16 +184,15 @@ void app_main(void) {
     };
     lvgl_port_add_disp(&disp_cfg);
     ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_handle, true, false));
-    ESP_LOGI(TAG, "4. 绘制华丽的 UI...");
-    if (lvgl_port_lock(0)) {
-        
-        ui_ar_glass_init(); // 这里调用我们在 ui_ar_glass.c 里写的界面初始化函数
-        ui_menu_screen_init(); // 初始化菜单界面
-        ui_novel_screen_init();
-        lv_scr_load(ui_novel_screen);
-        lvgl_port_unlock(); // 别忘了解锁，否则屏幕不刷新
-
-    }
+    set_default_time(); // 设置默认时间，防止无网时显示 1970 年
+    // ==========================================
+    // ✨ 核心大换血：启动 UI 大管家
+    // ==========================================
+    ESP_LOGI(TAG, "启动 UI 大管家...");
+    // ⚠️ 注意：不要在这里加 lvgl_port_lock() 了！
+    // 因为 ui_manager_init 内部已经自己加锁，并初始化了所有屏幕！
+    ui_manager_init();
+    
     // 5. 初始化硬件 I2C 总线
     ESP_ERROR_CHECK(i2c_master_init());
     ESP_LOGI(TAG, "I2C 硬件总线初始化完毕！");
@@ -169,7 +216,7 @@ void app_main(void) {
         printf("❌ 音频模块初始化失败！请检查日志。\n");
         return;
     }
-
+    
     // 9. 配置并启动 WebSocket 客户端
     esp_websocket_client_config_t websocket_cfg = {
         .uri = websocket_url,
@@ -179,36 +226,18 @@ void app_main(void) {
     esp_websocket_register_events(ws_client, WEBSOCKET_EVENT_ANY, websocket_event_handler, (void *)ws_client);
     esp_websocket_client_start(ws_client);
     app_mqtt_start();
+    time_sync_init(); // 启动时间同步，确保时间显示正确
     // 10. 创建传感器读取任务
     // ⚠️ 注意：前提是你已经在其他文件实现了 read_mpu6050_task，否则编译会报错找不到该函数
     xTaskCreate(read_mpu6050_task, "read_mpu6050_task", 4096, NULL, 5, NULL);
     xTaskCreate(read_max30105_task, "read_max30105_task", 4096, NULL, 6, NULL);
     xTaskCreate(read_bmp280_task, "read_bmp280_task", 4096, NULL, 4, NULL);
+    // 创建时间刷新任务 (分配 2KB 栈空间，优先级设低一点比如 2)
+    xTaskCreate(ui_time_update_task, "ui_time_task", 1024 * 2, NULL, 2, NULL);
     // 11. 主循环挂起
     while (1) {
         app_mqtt_publish("home/status/sensor", "TEMP:25C");
-        if (my_ble_send_data("Hello from JARVIS!")) {
-            ESP_LOGI(TAG, "蓝牙数据发送成功!");
-        }
-        // if (lvgl_port_lock(0))
-        // {
-        //     // 获取当前选中的索引
-        //     uint16_t cur_opt = lv_roller_get_selected(menu_roller);
-        //     // 往下滚一项 (带动画)
-        //     lv_roller_set_selected(menu_roller, (cur_opt + 1)%4, LV_ANIM_ON);
-            
-        //     lvgl_port_unlock();
-        // }
-        // novel_scroll_one_line();
-        // 示例 1：向左滑动进入【主菜单】
-// 参数 false 非常重要！它表示不要删除旧屏幕，因为你的屏幕是全局复用的。
-lv_scr_load_anim(ui_menu_screen, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
- vTaskDelay(pdMS_TO_TICKS(1000));
-// 示例 2：向右滑动返回【主页】
-lv_scr_load_anim(ui_main_screen, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 300, 0, false);
- vTaskDelay(pdMS_TO_TICKS(1000));
-// 示例 3：淡入淡出进入【小说界面】
-lv_scr_load_anim(ui_novel_screen, LV_SCR_LOAD_ANIM_FADE_ON, 500, 0, false);
-        vTaskDelay(pdMS_TO_TICKS(1000));
+         vTaskDelay(pdMS_TO_TICKS(1000));
+         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }

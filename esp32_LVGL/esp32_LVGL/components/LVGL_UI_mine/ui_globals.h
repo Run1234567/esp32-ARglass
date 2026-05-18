@@ -10,6 +10,7 @@ LV_FONT_DECLARE(my_font_cn_16);
 // 2. 屏幕对象声明 (方便跨页面切换)
 extern lv_obj_t * ui_main_screen;
 extern lv_obj_t * ui_menu_screen;
+extern lv_obj_t * ui_clock_screen; // ? 新增：时钟工具屏幕全局句柄
 
 // 3. 需要被 MQTT 动态更新的 UI 元素声明
 extern lv_obj_t * label_time;

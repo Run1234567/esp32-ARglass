@@ -2,5 +2,6 @@
 #define _UI_MENU_SCREEN_H
 
 void ui_menu_screen_init(void);
-
+void menu_scroll_down(void);
+void menu_scroll_up(void) ;
 #endif
