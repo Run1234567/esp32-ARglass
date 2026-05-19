@@ -108,6 +108,9 @@ void clean_text_for_tts(char *str) {
 // ✨ 全局书签：记录在 SD 卡文件中的绝对字节位置 
 static uint32_t current_file_offset = 0 ; 
 
+// ✨ 新增全局开关：记录当前是否允许语音播报 (1=开启, 0=关闭) 
+uint8_t global_tts_enabled = 1; 
+
 // ========================================== 
 // 📖 纯净版：从 SD 卡读取、TTS播报、并通过串口发给 UI 
 // ========================================== 
@@ -164,6 +167,13 @@ void test_read_novel_next_chunk(void) {
     // 调用我们在 my_uart.c 写的发送函数 
     my_uart_send(uart_send_buf); 
 
-    // 5. 【语音播报】 
-    tts_speak(read_buffer); 
+    // ====================================================== 
+    // ✨ 新增：发声前查岗，只有开关打开时才读出来！ 
+    // ====================================================== 
+    if (global_tts_enabled == 1) { 
+        // 5. 【语音播报】 
+        tts_speak(read_buffer); 
+    } else { 
+        ESP_LOGI("SD_READ", "🔇 语音已关闭，本次只发文字不发声"); 
+    }
 } 

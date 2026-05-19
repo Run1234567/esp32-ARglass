@@ -373,7 +373,7 @@ void app_main(void) {
     initAudio();
     initSpeaker();
     // 2. 初始化引擎
-   // init_tts_engine();
+   init_tts_engine();
     start_jarvis_brain();
     // 3. 运行业务
     
@@ -395,7 +395,6 @@ void app_main(void) {
     // 启动连接
     esp_websocket_client_start(ws_client);
     my_uart_init();
-    // tts_speak("贾维斯系统已启动，正在等待指令...");
     // 4. 开启独立线程：无情地抓取麦克风数据发给基站
 // 🌟 核心救命代码：强制绑定到 Core 1 (参数最后的 1) 🌟
     

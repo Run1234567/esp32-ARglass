@@ -6,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "my_uart.h" // 替换 MQTT 为串口
+#include "esp_log.h"
 
 #define SCREEN_ROWS 11      // 屏幕显示的行数
 #define ROW_WIDTH 40        // 每行最大字节
@@ -23,6 +24,10 @@ static lv_obj_t * label_settings = NULL;  // 设置面板里的文字
 static uint8_t is_in_settings = 0; // 0: 正在阅读, 1: 正在设置 
 static uint8_t auto_mode = 0;      // 0: 手动翻页, 1: 自动翻页 
 static int8_t auto_sec = 3;        // 默认自动翻页时间：3秒 
+
+// ✨ 新增：语音开关和菜单焦点变量 
+static uint8_t tts_enabled = 1;     // 默认 1 (开启) 
+static uint8_t setting_focus = 0;   // 0: 当前焦点在"翻页"，1: 焦点在"语音" 
 
 // 2. 显示队列 (二维数组，每一行是一个字符串)
 static char display_lines[SCREEN_ROWS][ROW_WIDTH];
@@ -118,14 +123,30 @@ static void auto_scroll_timer_cb(lv_timer_t * timer) {
 } 
  
 // ========================================== 
-// 🎨 刷新悬浮设置面板的显示 
+// 🎨 刷新悬浮设置面板的显示 (双菜单版) 
 // ========================================== 
 static void update_novel_settings_display(void) { 
-    if (auto_mode == 0) { 
-        lv_label_set_text(label_settings, "⚙️ 翻页模式\n\n#00FF00 [ 手动翻页 ]#\n\n上下划切换模式"); 
+    char buf[256]; 
+    char auto_str[32]; 
+    char tts_str[32]; 
+ 
+    // 1. 准备翻页显示的文字 
+    if (auto_mode == 0) strcpy(auto_str, "手动翻页"); 
+    else sprintf(auto_str, "自动: %d秒/行", auto_sec); 
+ 
+    // 2. 准备语音显示的文字 
+    strcpy(tts_str, tts_enabled ? "开启" : "关闭"); 
+ 
+    // 3. 根据焦点 setting_focus 来决定谁变黄、谁带箭头 
+    if (setting_focus == 0) { 
+        // 焦点在“翻页”上 
+        sprintf(buf, "⚙️ 阅读设置\n\n#FFFF00 > 翻页: %s <#\n  语音: %s  \n\n上下调节 右滑切换", auto_str, tts_str); 
     } else { 
-        lv_label_set_text_fmt(label_settings, "⚙️ 翻页模式\n\n#FFFF00 [ 自动: %d 秒/行 ]#\n\n上下划调节时间", auto_sec); 
+        // 焦点在“语音”上 
+        sprintf(buf, "⚙️ 阅读设置\n\n  翻页: %s  \n#FFFF00 > 语音: %s <#\n\n上下调节 右滑切换", auto_str, tts_str); 
     } 
+     
+    lv_label_set_text(label_settings, buf); 
 } 
 
 // ========================================== 
@@ -147,6 +168,7 @@ void novel_screen_handle_cmd(ui_cmd_t cmd) {
         else if (cmd == UI_CMD_RIGHT) { 
             // ✨ 右滑：唤出设置面板！ 
             is_in_settings = 1; 
+            setting_focus = 0; // 每次进来默认聚焦在第一项 
             lv_obj_clear_flag(panel_settings, LV_OBJ_FLAG_HIDDEN); // 显示面板 
             update_novel_settings_display(); 
              
@@ -155,33 +177,50 @@ void novel_screen_handle_cmd(ui_cmd_t cmd) {
         } 
     } 
     // ------------------------------------ 
-    // 状态 B：正在设置翻页模式 
+    // 状态 B：正在阅读设置中 
     // ------------------------------------ 
     else { 
-        if (cmd == UI_CMD_UP || cmd == UI_CMD_DOWN) { 
+        if (cmd == UI_CMD_RIGHT) { 
+            // ✨ 右滑：在两个设置项之间循环切换焦点 
+            setting_focus = (setting_focus + 1) % 2; 
+            update_novel_settings_display(); 
+        } 
+        else if (cmd == UI_CMD_UP || cmd == UI_CMD_DOWN) { 
             int offset = (cmd == UI_CMD_UP) ? 1 : -1; 
              
-            if (auto_mode == 0) { 
-                // 如果是手动，只要按了上下，就切进自动模式 
-                auto_mode = 1; 
-            } else { 
-                // 如果已经是自动，上下划调节秒数 
-                auto_sec += offset; 
-                if (auto_sec > 15) auto_sec = 15; // 最慢 15 秒一行 
-                if (auto_sec < 1) { 
-                    auto_sec = 1; 
-                    auto_mode = 0; // 减到 0 就退回手动模式 
+            // 🎯 修改翻页设置 
+            if (setting_focus == 0) { 
+                if (auto_mode == 0) auto_mode = 1; 
+                else { 
+                    auto_sec += offset; 
+                    if (auto_sec > 15) auto_sec = 15; 
+                    if (auto_sec < 1) { auto_sec = 1; auto_mode = 0; } 
+                } 
+            } 
+            // 🎯 修改语音设置 (并立即发送串口指令) 
+            else if (setting_focus == 1) { 
+                uint8_t old_tts = tts_enabled; 
+                tts_enabled = !tts_enabled; // 上下挥动都会切换开关 
+                 
+                // 如果状态真的变了，就通知另一个 ESP32 
+                if (old_tts != tts_enabled) { 
+                    if (tts_enabled) { 
+                        my_uart_send("CMD:TTS_ON\r\n"); 
+                        ESP_LOGI("NOVEL", "📢 已发送开启语音指令"); 
+                    } else { 
+                        my_uart_send("CMD:TTS_OFF\r\n"); 
+                        ESP_LOGI("NOVEL", "🔇 已发送关闭语音指令"); 
+                    } 
                 } 
             } 
             update_novel_settings_display(); 
         } 
-        else if (cmd == UI_CMD_LEFT || cmd == UI_CMD_RIGHT) { 
-            // ✨ 左划或右划：确认设置，关闭面板，继续阅读！ 
+        else if (cmd == UI_CMD_LEFT) { 
+            // ✨ 左划：确认设置，关闭面板，继续阅读 
             is_in_settings = 0; 
-            lv_obj_add_flag(panel_settings, LV_OBJ_FLAG_HIDDEN); // 隐藏面板 
+            lv_obj_add_flag(panel_settings, LV_OBJ_FLAG_HIDDEN); 
              
             if (auto_mode == 1) { 
-                // 重新设置定时器周期并启动 
                 lv_timer_set_period(auto_scroll_timer, auto_sec * 1000); 
                 lv_timer_resume(auto_scroll_timer); 
             } 

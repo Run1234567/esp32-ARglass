@@ -15,6 +15,9 @@ static const char *TAG = "MY_UART";
 #define RD_BUF_SIZE (BUF_SIZE)
 static QueueHandle_t uart_queue;
 
+// ? 引入跨文件全局开关
+extern uint8_t global_tts_enabled;
+
 static void uart_event_task(void *pvParameters)
 {
     uart_event_t event;
@@ -37,7 +40,7 @@ static void uart_event_task(void *pvParameters)
                         // 这里可以添加将数据注入书库的代码
                     } 
                     
-                    // 2?? ? 新增：判断是不是 UI 发来的“催更”请求！ 
+                    // 2?? ? 判断是不是 UI 发来的“催更”请求！ 
                     else if (strncmp((char*)dtmp, "CMD:NOVEL_END", 13) == 0) { 
                         ESP_LOGI(TAG, "? 收到 UI 催更请求：当前页读完了，立刻安排下一页！"); 
                         
@@ -45,6 +48,18 @@ static void uart_event_task(void *pvParameters)
                         test_read_novel_next_chunk(); 
                     } 
                     
+                    // ========================================== 
+                    // ? 新增：处理语音开关指令 
+                    // ========================================== 
+                    else if (strncmp((char*)dtmp, "CMD:TTS_ON", 10) == 0) { 
+                        global_tts_enabled = 1; // 打开开关 
+                        ESP_LOGI(TAG, "? 收到指令：已开启语音播报"); 
+                    } 
+                    else if (strncmp((char*)dtmp, "CMD:TTS_OFF", 11) == 0) { 
+                        global_tts_enabled = 0; // 关闭开关 
+                        ESP_LOGI(TAG, "? 收到指令：已关闭语音播报"); 
+                    } 
+
                     // 3?? 预留：电池电量数据 (前缀是 "BAT:") 
                     else if (strncmp((char*)dtmp, "BAT:", 4) == 0) { 
                         // ... 

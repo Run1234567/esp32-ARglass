@@ -8,6 +8,27 @@
 #include "freertos/task.h"
 #include "freertos/queue.h" // ✨ 引入队列
 #include <string.h>
+#include <ctype.h>  // 为了使用 ispunct 和 isspace
+
+// ==========================================
+// 🧠 内部辅助函数：判断并跳过中文标点 (UTF-8)
+// ==========================================
+static int skip_zh_punctuation(const char *str) {
+    // 常见中文标点大全 (UTF-8编码，通常每个占3字节)
+    const char *zh_puncs[] = {
+        "，", "。", "！", "？", "：", "；", "、",
+        "“", "”", "‘", "’", "（", "）",
+        "【", "】", "《", "》", "…", "—", "～", NULL
+    };
+    
+    for (int i = 0; zh_puncs[i] != NULL; i++) {
+        int len = strlen(zh_puncs[i]);
+        if (strncmp(str, zh_puncs[i], len) == 0) {
+            return len; // 命中！返回这个标点占用的字节数
+        }
+    }
+    return 0; // 不是中文标点
+}
 
 #define MOUNT_POINT "/sdcard"
 static const char *TAG = "TTS_APP";
@@ -109,19 +130,56 @@ void init_tts_engine() {
     }
 }
 // ==========================================
-// 4. 对外发声接口
+// 🔊 4. 对外发声接口 (带自动标点净化)
 // ==========================================
 void tts_speak(const char *text) {
     if (text == NULL || tts_queue == NULL) return;
     
-    // 动态复制一份文本，防止原来的字符串在其它任务里被销毁
-    char *text_copy = strdup(text);
-    if (text_copy) {
-        // 扔进队列，如果满了就不等了，直接丢弃
-        if (xQueueSend(tts_queue, &text_copy, 0) != pdTRUE) {
-            ESP_LOGW(TAG, "⚠️ TTS 队伍太长，该句被丢弃");
-            free(text_copy);
+    // 1. 动态分配内存（去标点后只会更短，所以按原长度分配绝对够用）
+    char *text_copy = (char *)malloc(strlen(text) + 1);
+    if (text_copy == NULL) {
+        ESP_LOGE(TAG, "❌ TTS 内存分配失败");
+        return;
+    }
+
+    char *dst = text_copy;
+    const char *src = text;
+
+    // 2. 遍历原文本，无情击杀所有标点
+    while (*src) {
+        // 🎯 拦截 A：处理 ASCII 标点、控制符和多余空格 (如 , . ! ? \n \r)
+        if (*src > 0 && *src < 127) {
+            if (ispunct((unsigned char)*src) || iscntrl((unsigned char)*src) || isspace((unsigned char)*src)) {
+                src++; // 遇到英文标点或空格，直接跳过
+                continue;
+            }
         }
+
+        // 🎯 拦截 B：处理全角中文标点
+        int zh_punc_len = skip_zh_punctuation(src);
+        if (zh_punc_len > 0) {
+            src += zh_punc_len; // 跳过这 3 个字节
+            continue;
+        }
+
+        // ✅ 安全放行：正常的文字，拷贝过去
+        *dst++ = *src++;
+    }
+    
+    *dst = '\0'; // 重新安全封口
+
+    // 3. 如果过滤完之后，发现这句话全是标点（变成空字符串了），就直接丢弃
+    if (strlen(text_copy) == 0) {
+        free(text_copy);
+        return;
+    }
+
+    // 4. 扔进队列，如果满了就不等了，直接丢弃
+    if (xQueueSend(tts_queue, &text_copy, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "⚠️ TTS 队伍太长，该句被丢弃");
+        free(text_copy); // 发送失败也要记得释放内存
+    } else {
+        // ESP_LOGI(TAG, "🔊 净化后送入TTS: %s", text_copy); // 调试时可以打开看看效果
     }
 }
 
