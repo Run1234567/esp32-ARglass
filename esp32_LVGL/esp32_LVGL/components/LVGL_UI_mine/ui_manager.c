@@ -79,12 +79,8 @@ static void process_ui_command(ui_cmd_t cmd) {
         // 3. 在【小说阅读器】
         // ------------------------------------------------
         case SCREEN_NOVEL:
-            if (cmd == UI_CMD_DOWN) {
-                novel_scroll_one_line(); // 下滑读下一行
-            }
-            else if (cmd == UI_CMD_LEFT) {
-                switch_to_screen(SCREEN_MENU); // 左滑退回菜单
-            }
+            // ? 修改：直接把指令交给小说模块自己的路由函数处理！ 
+            novel_screen_handle_cmd(cmd); 
             break;
 
         // ------------------------------------------------

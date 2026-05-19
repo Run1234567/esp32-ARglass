@@ -30,20 +30,6 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                      event->topic_len, event->topic, 
                      event->data_len, event->data);
 
-            // ✨ 精准判断：是不是眼镜发来的“催更”请求？
-            const char *target_topic = "jarvis/glasses/book";
-            if (event->topic_len == strlen(target_topic) && 
-                strncmp(event->topic, target_topic, event->topic_len) == 0) {
-                
-                ESP_LOGI(TAG, "⚡ 收到翻页请求，唤醒 SD 卡读取任务！");
-                
-                // 释放信号量（拉响警报）
-                if (next_page_sem != NULL) {
-                    xSemaphoreGive(next_page_sem); 
-                }
-            }
-            break;
-
         default:
             break;
     }

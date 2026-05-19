@@ -5,7 +5,7 @@
 #include "esp_lvgl_port.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "app_mqtt.h"
+#include "my_uart.h" // 替换 MQTT 为串口
 
 #define SCREEN_ROWS 11      // 屏幕显示的行数
 #define ROW_WIDTH 40        // 每行最大字节
@@ -13,18 +13,30 @@ uint8_t novel_scroll_task_running = 0; // 滚动任务状态标志
 // 1. 书库缓冲区 (用来存从网络或SD卡收到的几千字)
 char * novel_source_buffer =  NULL;
 
-size_t current_book_pos = 0;    // ✨ “书签”：记录读到哪里了
+size_t current_book_pos = 0;    // ? “书签”：记录读到哪里了
+
+// ✨ 新增：自动翻页相关的变量 
+static lv_timer_t * auto_scroll_timer = NULL; 
+static lv_obj_t * panel_settings = NULL;  // 悬浮设置面板 
+static lv_obj_t * label_settings = NULL;  // 设置面板里的文字 
+ 
+static uint8_t is_in_settings = 0; // 0: 正在阅读, 1: 正在设置 
+static uint8_t auto_mode = 0;      // 0: 手动翻页, 1: 自动翻页 
+static int8_t auto_sec = 3;        // 默认自动翻页时间：3秒 
 
 // 2. 显示队列 (二维数组，每一行是一个字符串)
 static char display_lines[SCREEN_ROWS][ROW_WIDTH];
 static char full_display_str[SCREEN_ROWS * ROW_WIDTH]; // 最终喂给LVGL的合体字符串
 // ==========================================
-// ✨ 核心函数：从书库取一行，并滚动显示 (精准切片版)
+// ? 核心函数：从书库取一行，并滚动显示 (精准切片版)
 // ==========================================
 void novel_scroll_one_line(void) {
     if (novel_source_buffer == NULL || novel_source_buffer[current_book_pos] == '\0') {
         novel_scroll_task_running=1;
-        app_mqtt_publish("jarvis/glasses/book", "novel_end"); // 书读完了，通知 Python 脚本可以发下一章了
+        
+        // ? 修改：通过串口向外发送“书读完了”的指令 
+        my_uart_send("CMD:NOVEL_END\r\n"); 
+        
         return; // 没书或者读完了，直接返回
     }
 
@@ -42,7 +54,7 @@ void novel_scroll_one_line(void) {
     // 智能截取（处理UTF-8，防止截断，并过滤垃圾字符）
     while (novel_source_buffer[current_book_pos] != '\0') {
         
-        // ✨ 关键修复 1：无情击杀 Windows 的 '\r' 回车符
+        // ? 关键修复 1：无情击杀 Windows 的 '\r' 回车符
         if (novel_source_buffer[current_book_pos] == '\r') {
             current_book_pos++;
             continue;
@@ -62,7 +74,7 @@ void novel_scroll_one_line(void) {
         else if (c < 0xF0) char_bytes = 3;  // 中文 (3字节)
         else char_bytes = 4;                // 罕见字/Emoji (4字节)
 
-        // ✨ 关键修复 2：严格根据物理宽度换行
+        // ? 关键修复 2：严格根据物理宽度换行
         // 如果加上这一个字，长度就塞爆 ROW_WIDTH 了
         if (line_len + char_bytes >= ROW_WIDTH - 1) {
             break; // 立刻刹车！这个字不要了，留给下一次调用 novel_scroll_one_line 时再读
@@ -96,8 +108,89 @@ void novel_scroll_one_line(void) {
     }
 }
 
+// ========================================== 
+// ⏱️ 自动翻页定时器回调 
+// ========================================== 
+static void auto_scroll_timer_cb(lv_timer_t * timer) { 
+    if (!is_in_settings && auto_mode == 1) { 
+        novel_scroll_one_line(); // 自动调取下一行 
+    } 
+} 
+ 
+// ========================================== 
+// 🎨 刷新悬浮设置面板的显示 
+// ========================================== 
+static void update_novel_settings_display(void) { 
+    if (auto_mode == 0) { 
+        lv_label_set_text(label_settings, "⚙️ 翻页模式\n\n#00FF00 [ 手动翻页 ]#\n\n上下划切换模式"); 
+    } else { 
+        lv_label_set_text_fmt(label_settings, "⚙️ 翻页模式\n\n#FFFF00 [ 自动: %d 秒/行 ]#\n\n上下划调节时间", auto_sec); 
+    } 
+} 
 
-// 🌍 定义全局对象
+// ========================================== 
+// 🎮 小说模块专属手势路由 
+// ========================================== 
+void novel_screen_handle_cmd(ui_cmd_t cmd) { 
+     
+    // ------------------------------------ 
+    // 状态 A：正常阅读中 
+    // ------------------------------------ 
+    if (is_in_settings == 0) { 
+        if (cmd == UI_CMD_DOWN) { 
+            novel_scroll_one_line(); // 手动下一行 
+        } 
+        else if (cmd == UI_CMD_LEFT) { 
+            extern void switch_to_screen(ui_screen_state_t target); 
+            switch_to_screen(SCREEN_MENU); // 左滑退出 
+        } 
+        else if (cmd == UI_CMD_RIGHT) { 
+            // ✨ 右滑：唤出设置面板！ 
+            is_in_settings = 1; 
+            lv_obj_clear_flag(panel_settings, LV_OBJ_FLAG_HIDDEN); // 显示面板 
+            update_novel_settings_display(); 
+             
+            // 暂停自动翻页，防止在设置时屏幕还在滚 
+            if (auto_mode == 1) lv_timer_pause(auto_scroll_timer); 
+        } 
+    } 
+    // ------------------------------------ 
+    // 状态 B：正在设置翻页模式 
+    // ------------------------------------ 
+    else { 
+        if (cmd == UI_CMD_UP || cmd == UI_CMD_DOWN) { 
+            int offset = (cmd == UI_CMD_UP) ? 1 : -1; 
+             
+            if (auto_mode == 0) { 
+                // 如果是手动，只要按了上下，就切进自动模式 
+                auto_mode = 1; 
+            } else { 
+                // 如果已经是自动，上下划调节秒数 
+                auto_sec += offset; 
+                if (auto_sec > 15) auto_sec = 15; // 最慢 15 秒一行 
+                if (auto_sec < 1) { 
+                    auto_sec = 1; 
+                    auto_mode = 0; // 减到 0 就退回手动模式 
+                } 
+            } 
+            update_novel_settings_display(); 
+        } 
+        else if (cmd == UI_CMD_LEFT || cmd == UI_CMD_RIGHT) { 
+            // ✨ 左划或右划：确认设置，关闭面板，继续阅读！ 
+            is_in_settings = 0; 
+            lv_obj_add_flag(panel_settings, LV_OBJ_FLAG_HIDDEN); // 隐藏面板 
+             
+            if (auto_mode == 1) { 
+                // 重新设置定时器周期并启动 
+                lv_timer_set_period(auto_scroll_timer, auto_sec * 1000); 
+                lv_timer_resume(auto_scroll_timer); 
+            } 
+        } 
+    } 
+} 
+
+
+// ? 定义全局对象
 lv_obj_t * ui_novel_screen;
 lv_obj_t * label_novel_text;
 lv_obj_t * novel_scroll_cont; // 滚动容器也提出来，方便以后用代码让它滚动
@@ -131,14 +224,14 @@ void ui_novel_screen_init(void) {
     lv_obj_set_style_border_width(novel_scroll_cont, 0, 0);
     lv_obj_set_style_pad_all(novel_scroll_cont, 5, 0); 
     
-    // ⚠️ 关键设置：只允许垂直滚动，隐藏或自动显示滚动条
+    // ?? 关键设置：只允许垂直滚动，隐藏或自动显示滚动条
     lv_obj_set_scroll_dir(novel_scroll_cont, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(novel_scroll_cont, LV_SCROLLBAR_MODE_AUTO);
 
     // 3. 创建小说文本标签
     label_novel_text = lv_label_create(novel_scroll_cont);
     
-    // ⚠️ 极其关键：必须限制宽度，否则文字会一直往右跑跑到屏幕外面
+    // ?? 极其关键：必须限制宽度，否则文字会一直往右跑跑到屏幕外面
     lv_obj_set_width(label_novel_text, 220); // 留一点边距给滚动条
     
     // 开启自动换行模式
@@ -153,4 +246,23 @@ void ui_novel_screen_init(void) {
     
     // 初始提示语
     lv_label_set_text(label_novel_text, test_novel_text);
+
+    // ✨ 1. 创建悬浮设置面板 (默认隐藏) 
+    panel_settings = lv_obj_create(ui_novel_screen); 
+    lv_obj_set_size(panel_settings, 180, 120); 
+    lv_obj_center(panel_settings); 
+    lv_obj_set_style_bg_color(panel_settings, lv_color_hex(0x222222), 0); // 深灰色背景 
+    lv_obj_set_style_border_color(panel_settings, lv_color_hex(0x555555), 0); 
+    lv_obj_set_style_border_width(panel_settings, 2, 0); 
+    lv_obj_add_flag(panel_settings, LV_OBJ_FLAG_HIDDEN); // 初始状态隐藏 
+ 
+    label_settings = lv_label_create(panel_settings); 
+    lv_obj_center(label_settings); 
+    lv_label_set_recolor(label_settings, true); // 允许变色 
+    lv_obj_set_style_text_align(label_settings, LV_TEXT_ALIGN_CENTER, 0); 
+    lv_obj_set_style_text_font(label_settings, &my_font_cn_16, 0); 
+ 
+    // ✨ 2. 创建自动翻页定时器 (初始暂停) 
+    auto_scroll_timer = lv_timer_create(auto_scroll_timer_cb, 3000, NULL); 
+    lv_timer_pause(auto_scroll_timer); 
 }

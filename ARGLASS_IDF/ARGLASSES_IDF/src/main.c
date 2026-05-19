@@ -25,7 +25,7 @@ esp_tts_handle_t *tts_handle = NULL;
 #include "speaker_app.h"
 #include "esp_camera.h"
 #include "sd_card_app.h" // ? 加上这句！引入 SD 卡模块
-#include "app_mqtt.h" // ? 加上这句！引入 MQTT 模块
+#include "my_uart.h"    // ✨ 引入串口模块 (彻底替换了 app_mqtt.h)
 #include "record_app.h" // ? 加上这句！引入录音模块
 #include "tts_app.h" // ? 加上这句！引入 TTS 模块
 #include "music_app.h" // ? 加上这句！引入音乐播放器模块
@@ -51,6 +51,7 @@ const char* websocket_url = "ws://124.220.224.189:8765/";
 esp_websocket_client_handle_t ws_client;
 
 SemaphoreHandle_t speaker_mutex = NULL;
+SemaphoreHandle_t next_page_sem = NULL;
 // ==========================================
 // ? 拍照并发送
 // ==========================================
@@ -393,7 +394,7 @@ void app_main(void) {
     
     // 启动连接
     esp_websocket_client_start(ws_client);
-    app_mqtt_start();
+    my_uart_init();
     // tts_speak("贾维斯系统已启动，正在等待指令...");
     // 4. 开启独立线程：无情地抓取麦克风数据发给基站
 // 🌟 核心救命代码：强制绑定到 Core 1 (参数最后的 1) 🌟
@@ -424,7 +425,7 @@ void app_main(void) {
     stop_record();
     // 主线程可在此挂起
     while(1) {
-        app_mqtt_publish("home/status/sensor", "TEMP:52");
+        my_uart_send("TEMP:52");
         vTaskDelay(pdMS_TO_TICKS(10000)); 
     }
 }
