@@ -11,6 +11,7 @@
 #include "ui_record_screen.h" // ? 新增
 #include "ui_playlist_screen.h" // ✨ 引入
 #include "ui_camera_screen.h" // ✨ 引入相机界面
+#include "ui_noise_screen.h" // noise meter
 #include "my_uart.h" // ✨ 引入串口，用于获取列表
 
 static const char *TAG = "UI_MANAGER";
@@ -35,6 +36,7 @@ void switch_to_screen(ui_screen_state_t target_screen) {
         case SCREEN_RECORD:  target_obj = ui_record_screen; break;
         case SCREEN_PLAYLIST: target_obj = ui_playlist_screen; break;
         case SCREEN_CAMERA:  target_obj = ui_camera_screen; break;
+        case SCREEN_NOISE:   target_obj = ui_noise_screen; break;
         default: return;
     }
 
@@ -42,8 +44,17 @@ void switch_to_screen(ui_screen_state_t target_screen) {
         my_uart_send("CMD:GET_REC_LIST\r\n");
     }
 
+    if (current_screen == SCREEN_NOISE && target_screen != SCREEN_NOISE) {
+        my_uart_send("CMD:NOISE_OFF\r\n");
+    }
+
     lv_scr_load_anim(target_obj, LV_SCR_LOAD_ANIM_NONE, 0, 0, false);
     current_screen = target_screen;
+
+    if (current_screen == SCREEN_NOISE) {
+        my_uart_send("CMD:NOISE_ON\r\n");
+    }
+
     ESP_LOGI(TAG, "? 屏幕切换至: %d", current_screen);
 }
 
@@ -83,8 +94,9 @@ static void process_ui_command(ui_cmd_t cmd) {
                 if (selected_idx == 3) switch_to_screen(SCREEN_RECORD); // ✨ 选中第4项进录音
                 if (selected_idx == 4) switch_to_screen(SCREEN_PLAYLIST); // ✨ 选中第5项进回放
                 if (selected_idx == 5) switch_to_screen(SCREEN_CAMERA); // ✨ 选中第6项进相机
+                if (selected_idx == 7) switch_to_screen(SCREEN_NOISE); // 选中第8项进噪声监测
                 // 1 是健康，6 是 AI 对话 (预留)
-                if (selected_idx == 7) switch_to_screen(SCREEN_NOVEL); // 进系统设置/小说
+                if (selected_idx == 8) switch_to_screen(SCREEN_NOVEL); // 进系统设置/小说
             }
             break;
 
@@ -113,6 +125,10 @@ static void process_ui_command(ui_cmd_t cmd) {
 
         case SCREEN_CAMERA:
             camera_screen_handle_cmd(cmd); // ✨ 直接把手势交给相机模块
+            break;
+
+        case SCREEN_NOISE:
+            if (cmd == UI_CMD_LEFT) switch_to_screen(SCREEN_MENU);
             break;
 
         default:
@@ -152,6 +168,7 @@ void ui_manager_init(void) {
         ui_record_screen_init(); // ✨ 新增
         ui_playlist_screen_init(); // ✨ 新增
         ui_camera_screen_init(); // ✨ 新增：相机界面初始化
+        ui_noise_screen_init(); // noise meter
         
         // 初始显示主屏幕
         lv_scr_load(ui_main_screen);

@@ -134,6 +134,20 @@ static void uart_event_task(void *pvParameters)
                         extern void execute_high_res_capture(void);
                         execute_high_res_capture();
                     }
+
+                    // ==========================================
+                    // ✨ 噪声界面订阅协议
+                    // ==========================================
+                    else if (strstr((char*)dtmp, "CMD:NOISE_ON") != NULL) {
+                        extern volatile bool send_noise_data;
+                        send_noise_data = true;
+                        ESP_LOGI(TAG, "🟢 收到 UI 指令：开始发送噪声数据 (10Hz)");
+                    }
+                    else if (strstr((char*)dtmp, "CMD:NOISE_OFF") != NULL) {
+                        extern volatile bool send_noise_data;
+                        send_noise_data = false;
+                        ESP_LOGI(TAG, "🔴 收到 UI 指令：停止发送噪声数据");
+                    }
                     break;
                 case UART_FIFO_OVF:
                     ESP_LOGI(TAG, "hw fifo overflow");

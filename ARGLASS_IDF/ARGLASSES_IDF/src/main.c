@@ -40,6 +40,8 @@ RingbufHandle_t yin_ringbuf = NULL; // ? 新增：专为测音调准备的缓冲
 RingbufHandle_t sr_ringbuf = NULL; // ? 新增：AI 语音识别专属缓冲池
 static const char *TAG = "J.A.R.V.I.S";
 
+volatile bool send_noise_data = false;
+
 // ==========================================
 // ?? 您的专属配置 ??
 // ==========================================
@@ -171,6 +173,8 @@ void audio_hub_task(void *pvParameters) {
     const size_t samples = 512;
     int16_t audioBuffer[samples];
 
+    static TickType_t last_send_time = 0;
+
     ESP_LOGI("AUDIO_HUB", "?? 麦克风核心采集枢纽已启动");
 
     while (1) {
@@ -179,7 +183,17 @@ void audio_hub_task(void *pvParameters) {
         if (bytesRead > 0) {
             // 1. 算噪音
             float db_value = calculate_decibel(audioBuffer, samples);
-            // ESP_LOGI("NOISE", "当前环境噪音: %.1f dB SPL", db_value);
+
+            if (send_noise_data) {
+                TickType_t current_time = xTaskGetTickCount();
+                if (current_time - last_send_time >= pdMS_TO_TICKS(100)) {
+                    char db_cmd[16];
+                    snprintf(db_cmd, sizeof(db_cmd), "DB:%d", (int)db_value);
+                    my_uart_send(db_cmd);
+                    last_send_time = current_time;
+                }
+            }
+
             // 2. 发给 WebSocket
             if (ws_ringbuf != NULL && esp_websocket_client_is_connected(ws_client)) {
                 xRingbufferSend(ws_ringbuf, audioBuffer, bytesRead, 0); 

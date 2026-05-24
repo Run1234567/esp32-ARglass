@@ -60,6 +60,11 @@ static void uart_event_task(void *pvParameters) {
                         extern void camera_reset_status_label(void);
                         camera_reset_status_label();
                     }
+                    else if (strncmp((char*)dtmp, "DB:", 3) == 0) {
+                        int db_value = atoi((char*)dtmp + 3);
+                        extern void update_noise_meter(int val);
+                        update_noise_meter(db_value);
+                    }
                 }
             }
             else if (event.type == UART_FIFO_OVF || event.type == UART_BUFFER_FULL) {

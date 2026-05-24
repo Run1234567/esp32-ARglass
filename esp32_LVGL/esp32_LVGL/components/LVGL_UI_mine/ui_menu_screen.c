@@ -1,7 +1,7 @@
 #include "ui_menu_screen.h"
 #include "ui_globals.h" // 引入全局变量枢纽
 // 菜单选项总数
-#define MENU_ITEM_COUNT 8
+#define MENU_ITEM_COUNT 9
 // =========================================================
 // ? 真正定义菜单界面的全局对象 (分配内存)
 // =========================================================
@@ -38,6 +38,7 @@ void ui_menu_screen_init(void) {
                         "📁 录音回放\n"
                         "📷 AR相机\n"
                         "🤖 AI 对话\n"
+                        "🔊 噪声监测\n"
                         "⚙️ 系统设置",
                         LV_ROLLER_MODE_INFINITE); // 无限循环模式，滚到底会自动接上开头
 
