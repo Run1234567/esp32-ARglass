@@ -3,13 +3,16 @@
 
 #include "esp_err.h"
 
-// ? Ò»¼ü¿ªÊ¼Â¼Òô (×Ô¶¯ÃüÃû REC_xxx.wav)
+// ? Ò»ï¿½ï¿½ï¿½ï¿½Ê¼Â¼ï¿½ï¿½ (ï¿½Ô¶ï¿½ï¿½ï¿½ï¿½ï¿½ REC_xxx.wav)
 esp_err_t start_record(void);
 
-// ? Í£Ö¹Â¼Òô
+// ? Í£Ö¹Â¼ï¿½ï¿½
 void stop_record(void);
 
-// ? ÅÄÕÕ¹¦ÄÜ½Ó¿Ú (Ò»¼ü×¥ÅÄ²¢×Ô¶¯ÃüÃû IMG_xxx.jpg)
+// ? ï¿½ï¿½ï¿½Õ¹ï¿½ï¿½Ü½Ó¿ï¿½ (Ò»ï¿½ï¿½×¥ï¿½Ä²ï¿½ï¿½Ô¶ï¿½ï¿½ï¿½ï¿½ï¿½ IMG_xxx.jpg)
 esp_err_t take_photo_and_save(void);
+
+// ğŸ“‚ æ‰«æ ly æ–‡ä»¶å¤¹å¹¶é€šè¿‡ä¸²å£å‘é€æ–‡ä»¶åˆ—è¡¨ 
+void scan_and_send_record_list(void);
 
 #endif // RECORD_APP_H

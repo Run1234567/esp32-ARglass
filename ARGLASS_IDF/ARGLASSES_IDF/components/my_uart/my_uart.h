@@ -6,7 +6,7 @@
 #define UART_NUM UART_NUM_1
 #define TXD_PIN 4
 #define RXD_PIN 5
-#define BUF_SIZE 1024
+#define BUF_SIZE 4096
 
 void my_uart_init(void);
 void my_uart_send(const char* data);

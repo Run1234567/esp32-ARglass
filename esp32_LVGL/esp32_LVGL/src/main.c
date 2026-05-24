@@ -4,12 +4,12 @@
 #include "esp_log.h"
 #include "tft_display.h"
 #include "driver/i2c.h"
-#include "esp_websocket_client.h" // ÒıÈë WebSocket ¿Í»§¶Ë
+#include "esp_websocket_client.h" // å¼•å…¥ WebSocket å®¢æˆ·ç«¯
 #include "nvs_flash.h"
-// ÒıÈë LVGL ºËĞÄÓëÒÆÖ²°ü
+// å¼•å…¥ LVGL æ ¸å¿ƒä¸ç§»æ¤åŒ…
 #include "lvgl.h"
 #include "esp_lvgl_port.h"
-#include "math.h" // ÒıÈëÊıÑ§¿â£¬ºóÃæ»áÓÃµ½ÕıÏÒº¯ÊıÀ´Éú³É²âÊÔÒôÆµÊı¾İ
+#include "math.h" // å¼•å…¥æ•°å­¦åº“ï¼Œåé¢ä¼šç”¨åˆ°æ­£å¼¦å‡½æ•°æ¥ç”Ÿæˆæµ‹è¯•éŸ³é¢‘æ•°æ®
 #include <time.h>
 #include <sys/time.h>
 #include "esp_sntp.h"
@@ -21,32 +21,32 @@
 #include "my_wifi.h"
 #include "audio_driver.h"
 #include "app_mqtt.h"
-#include "my_ble.h" // ÒıÈëÎÒÃÇ¸Õ²ÅĞ´µÄÀ¶ÑÀÄ£¿éÍ·ÎÄ¼ş
-#include "my_uart.h" // ? ĞÂÔö£º´®¿ÚÍ¨ĞÅÄ£¿é
+#include "my_ble.h" // å¼•å…¥æˆ‘ä»¬åˆšæ‰å†™çš„è“ç‰™æ¨¡å—å¤´æ–‡ä»¶
+#include "my_uart.h" // ? æ–°å¢ï¼šä¸²å£é€šä¿¡æ¨¡å—
 
 #include "ui_ar_glass.h"
 #include "ui_menu_screen.h"
-#include "ui_globals.h" // ÒıÈëÈ«¾Ö±äÁ¿ÊàÅ¦
-#include "ui_novel_screen.h" // ÒıÈëĞ¡ËµÆÁÄ»µÄÍ·ÎÄ¼ş£¬ÀïÃæÓĞ³õÊ¼»¯º¯ÊıÉùÃ÷
+#include "ui_globals.h" // å¼•å…¥å…¨å±€å˜é‡æ¢çº½
+#include "ui_novel_screen.h" // å¼•å…¥å°è¯´å±å¹•çš„å¤´æ–‡ä»¶ï¼Œé‡Œé¢æœ‰åˆå§‹åŒ–å‡½æ•°å£°æ˜
 #include "ui_manager.h"
 
 
 // ==========================================
-// ? ·şÎñÆ÷ÅäÖÃ (Çë¸Ä³ÉÄãÔËĞĞ Python ½Å±¾µÄµçÄÔ IP)
+// ? æœåŠ¡å™¨é…ç½® (è¯·æ”¹æˆä½ è¿è¡Œ Python è„šæœ¬çš„ç”µè„‘ IP)
 // ==========================================
 const char* websocket_url = "ws://124.220.224.189:8765/"; 
 esp_websocket_client_handle_t ws_client;
 LV_FONT_DECLARE(my_font_cn_16);
 
-#define SAMPLE_RATE 16000       // ²ÉÑùÂÊ±ØĞëºÍ audio_driver.c ÀïÅäÖÃµÄÒ»ÖÂ
-#define FREQUENCY 440.0         // ²âÊÔÒôÆµÆµÂÊ 440Hz (±ê×¼ÒôA)
-#define AMPLITUDE 8000          // ÒôÁ¿´óĞ¡ (16Î»PCM×î´óÊÇ32767£¬8000ÊÇÒ»¸öÊÊÖĞÇÒ²»´Ì¶úµÄÒôÁ¿)
-#define BUFFER_SAMPLES 512      // Ã¿´Î¼ÆËã/·¢ËÍµÄ²ÉÑùµãÊı
+#define SAMPLE_RATE 16000       // é‡‡æ ·ç‡å¿…é¡»å’Œ audio_driver.c é‡Œé…ç½®çš„ä¸€è‡´
+#define FREQUENCY 440.0         // æµ‹è¯•éŸ³é¢‘é¢‘ç‡ 440Hz (æ ‡å‡†éŸ³A)
+#define AMPLITUDE 8000          // éŸ³é‡å¤§å° (16ä½PCMæœ€å¤§æ˜¯32767ï¼Œ8000æ˜¯ä¸€ä¸ªé€‚ä¸­ä¸”ä¸åˆºè€³çš„éŸ³é‡)
+#define BUFFER_SAMPLES 512      // æ¯æ¬¡è®¡ç®—/å‘é€çš„é‡‡æ ·ç‚¹æ•°
 
-// ¶¨ÒåÒ»¸öË«ÉùµÀÒôÆµ»º³åÇø (Ã¿¸ö²ÉÑùµã16Î»£¬×óÉùµÀ+ÓÒÉùµÀ£¬ËùÒÔÊı×é´óĞ¡Òª³ËÒÔ2)
+// å®šä¹‰ä¸€ä¸ªåŒå£°é“éŸ³é¢‘ç¼“å†²åŒº (æ¯ä¸ªé‡‡æ ·ç‚¹16ä½ï¼Œå·¦å£°é“+å³å£°é“ï¼Œæ‰€ä»¥æ•°ç»„å¤§å°è¦ä¹˜ä»¥2)
 int16_t audio_buffer[BUFFER_SAMPLES * 2];
 
-// Í³Ò»µÄ I2C Òı½ÅºÍ²ÎÊıÅäÖÃ£¨¸ù¾İÄã MPU6050 ÀïµÄÉèÖÃÌáÈ¡³öÀ´£©
+// ç»Ÿä¸€çš„ I2C å¼•è„šå’Œå‚æ•°é…ç½®ï¼ˆæ ¹æ®ä½  MPU6050 é‡Œçš„è®¾ç½®æå–å‡ºæ¥ï¼‰
 #define I2C_MASTER_SCL_IO           1
 #define I2C_MASTER_SDA_IO           2
 #define I2C_MASTER_NUM              I2C_NUM_0
@@ -54,7 +54,7 @@ int16_t audio_buffer[BUFFER_SAMPLES * 2];
 
 static const char *TAG = "MAIN";
 // ----------------------------------------------------
-// È«¾ÖÎ¨Ò»µÄ I2C ×ÜÏß³õÊ¼»¯º¯Êı
+// å…¨å±€å”¯ä¸€çš„ I2C æ€»çº¿åˆå§‹åŒ–å‡½æ•°
 // ----------------------------------------------------
 static esp_err_t i2c_master_init(void) {
     i2c_config_t conf = {
@@ -73,45 +73,45 @@ static esp_err_t i2c_master_init(void) {
 
 
 // =========================================================
-// ? ÉèÖÃ¶ÏÍøÇé¿öÏÂµÄÄ¬ÈÏ¿ª»úÊ±¼ä
+// ? è®¾ç½®æ–­ç½‘æƒ…å†µä¸‹çš„é»˜è®¤å¼€æœºæ—¶é—´
 // =========================================================
 void set_default_time(void) {
-    // 1. ÏÈÉèÖÃºÃÊ±Çø£¬±£Ö¤ÎÒÃÇÉè¶¨µÄ 12:00 ÊÇ±±¾©Ê±¼äµÄ 12:00
+    // 1. å…ˆè®¾ç½®å¥½æ—¶åŒºï¼Œä¿è¯æˆ‘ä»¬è®¾å®šçš„ 12:00 æ˜¯åŒ—äº¬æ—¶é—´çš„ 12:00
     setenv("TZ", "CST-8", 1);
     tzset();
 
-    // 2. ¹¹Ôì 2026Äê1ÔÂ1ÈÕ 12:00:00 µÄÊ±¼ä½á¹¹Ìå
+    // 2. æ„é€  2026å¹´1æœˆ1æ—¥ 12:00:00 çš„æ—¶é—´ç»“æ„ä½“
     struct tm tm_default = {0};
-    tm_default.tm_year = 2026 - 1900; // CÓïÑÔ±ê×¼£ºÄê·İ´Ó 1900 ËãÆğ
-    tm_default.tm_mon  = 1 - 1;       // CÓïÑÔ±ê×¼£ºÔÂ·İÊÇ 0 µ½ 11
-    tm_default.tm_mday = 1;           // 1ÈÕ
-    tm_default.tm_hour = 12;          // 12µã
-    tm_default.tm_min  = 0;           // 0·Ö
-    tm_default.tm_sec  = 0;           // 0Ãë
+    tm_default.tm_year = 2026 - 1900; // Cè¯­è¨€æ ‡å‡†ï¼šå¹´ä»½ä» 1900 ç®—èµ·
+    tm_default.tm_mon  = 1 - 1;       // Cè¯­è¨€æ ‡å‡†ï¼šæœˆä»½æ˜¯ 0 åˆ° 11
+    tm_default.tm_mday = 1;           // 1æ—¥
+    tm_default.tm_hour = 12;          // 12ç‚¹
+    tm_default.tm_min  = 0;           // 0åˆ†
+    tm_default.tm_sec  = 0;           // 0ç§’
 
-    // 3. ½«½á¹¹Ìå×ª»»ÎªÊ±¼ä´Á
+    // 3. å°†ç»“æ„ä½“è½¬æ¢ä¸ºæ—¶é—´æˆ³
     time_t t = mktime(&tm_default);
 
-    // 4. Ç¿ĞĞĞ´Èë ESP32 µÄµ×²ãÏµÍ³Ê±ÖÓ
+    // 4. å¼ºè¡Œå†™å…¥ ESP32 çš„åº•å±‚ç³»ç»Ÿæ—¶é’Ÿ
     struct timeval now = { .tv_sec = t, .tv_usec = 0 };
     settimeofday(&now, NULL);
     
-    ESP_LOGI("TIME", "? ÎŞÍøÄ¬ÈÏ¿ª»úÊ±¼äÒÑÉèÖÃÎª 2026-01-01 12:00:00");
+    ESP_LOGI("TIME", "? æ— ç½‘é»˜è®¤å¼€æœºæ—¶é—´å·²è®¾ç½®ä¸º 2026-01-01 12:00:00");
 }
 // =========================================================
-// ?? ³õÊ¼»¯ÍøÂçÊ±¼äÍ¬²½
+// ?? åˆå§‹åŒ–ç½‘ç»œæ—¶é—´åŒæ­¥
 // =========================================================
 void time_sync_init(void) {
-    ESP_LOGI("TIME", "ÕıÔÚ³õÊ¼»¯ SNTP Ê±¼äÍ¬²½...");
+    ESP_LOGI("TIME", "æ­£åœ¨åˆå§‹åŒ– SNTP æ—¶é—´åŒæ­¥...");
     
-    // ÉèÖÃÊ±ÇøÎªÖĞ¹ú±ê×¼Ê±¼ä (UTC+8)
+    // è®¾ç½®æ—¶åŒºä¸ºä¸­å›½æ ‡å‡†æ—¶é—´ (UTC+8)
     setenv("TZ", "CST-8", 1);
     tzset();
 
-    // ÅäÖÃ NTP ·şÎñÆ÷
+    // é…ç½® NTP æœåŠ¡å™¨
     esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
-    esp_sntp_setservername(0, "pool.ntp.org");    // ¹ú¼Ê¹«¹² NTP
-    esp_sntp_setservername(1, "ntp.aliyun.com");  // °¢ÀïÔÆ NTP (¹úÄÚ±¸ÓÃ£¬ËÙ¶È¿ì)
+    esp_sntp_setservername(0, "pool.ntp.org");    // å›½é™…å…¬å…± NTP
+    esp_sntp_setservername(1, "ntp.aliyun.com");  // é˜¿é‡Œäº‘ NTP (å›½å†…å¤‡ç”¨ï¼Œé€Ÿåº¦å¿«)
     esp_sntp_init();
 }
 
@@ -122,34 +122,34 @@ void read_max30105_task(void *pvParameters) {
     
     while (1) {
         if (max30105_read_fifo(I2C_MASTER_NUM, &red_val, &ir_val) == ESP_OK) {
-            // Ê¹ÓÃ printf Êä³ö´¿Êı¾İ£¬¸ñÊ½Îª "ºì¹â,ºìÍâ¹â"
-            // ÕâÖÖ¸ñÊ½¿ÉÒÔÖ±½Ó±» Arduino IDE »òÆäËû´®¿Ú»æÍ¼ÒÇÊ¶±ğ²¢»­³öÁ½ÌõÕÛÏß
+            // ä½¿ç”¨ printf è¾“å‡ºçº¯æ•°æ®ï¼Œæ ¼å¼ä¸º "çº¢å…‰,çº¢å¤–å…‰"
+            // è¿™ç§æ ¼å¼å¯ä»¥ç›´æ¥è¢« Arduino IDE æˆ–å…¶ä»–ä¸²å£ç»˜å›¾ä»ªè¯†åˆ«å¹¶ç”»å‡ºä¸¤æ¡æŠ˜çº¿
             printf("%lu,%lu\n", red_val, ir_val);
         }
         
-        // ¾ø¶ÔÑÓÊ± 5ms (Ïàµ±ÓÚ 200Hz µÄ¶ÁÈ¡ÆµÂÊ)
+        // ç»å¯¹å»¶æ—¶ 5ms (ç›¸å½“äº 200Hz çš„è¯»å–é¢‘ç‡)
         vTaskDelay(pdMS_TO_TICKS(5)); 
     }
 }
 
 // ==========================================
-// ? WebSocket ÊÂ¼ş»Øµ÷£º½ÓÊÕÒôÆµ²¢²¥·Å
+// ? WebSocket äº‹ä»¶å›è°ƒï¼šæ¥æ”¶éŸ³é¢‘å¹¶æ’­æ”¾
 // ==========================================
 static void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data) {
     esp_websocket_event_data_t *data = (esp_websocket_event_data_t *)event_data;
     
     switch (event_id) {
         case WEBSOCKET_EVENT_CONNECTED:
-            ESP_LOGI(TAG, "? ÒÑÁ¬½Óµ½»ùÕ¾·şÎñÆ÷!");
+            ESP_LOGI(TAG, " å·²è¿æ¥åˆ°åŸºç«™æœåŠ¡å™¨!");
             break;
         case WEBSOCKET_EVENT_DISCONNECTED:
-            ESP_LOGW(TAG, "?? Óë»ùÕ¾¶Ï¿ªÁ¬½Ó£¬³¢ÊÔÖØÁ¬...");
+            ESP_LOGW(TAG, " ä¸åŸºç«™æ–­å¼€è¿æ¥ï¼Œå°è¯•é‡è¿...");
             break;
         case WEBSOCKET_EVENT_DATA:
-            // op_code == 2 ±íÊ¾ÊÕµ½µÄÊÇ¶ş½øÖÆÁ÷ (BIN)£¬¼´ Python ·¢À´µÄ PCM ÒôÆµÊı¾İ
+            // op_code == 2 è¡¨ç¤ºæ”¶åˆ°çš„æ˜¯äºŒè¿›åˆ¶æµ (BIN)ï¼Œå³ Python å‘æ¥çš„ PCM éŸ³é¢‘æ•°æ®
             if (data->op_code == 2 && data->data_len > 0) {
-                // ºËĞÄÄ§·¨£º½«ÊÕµ½µÄÍøÂçÒôÆµ¿é£¬Ö±½ÓÈû¸ø I2S Çı¶¯»º³åÇø£¡
-                // I2S Çı¶¯ÄÚ²¿ÅäÖÃÁË portMAX_DELAY£¬Èç¹ûµ×²ã²¥·ÅÃ»²¥Íê£¬ÕâÀï»á×Ô¶¯×èÈû£¬ÍêÃÀ¿ØÖÆÍøËÙ²»Òç³ö
+                // æ ¸å¿ƒé­”æ³•ï¼šå°†æ”¶åˆ°çš„ç½‘ç»œéŸ³é¢‘å—ï¼Œç›´æ¥å¡ç»™ I2S é©±åŠ¨ç¼“å†²åŒºï¼
+                // I2S é©±åŠ¨å†…éƒ¨é…ç½®äº† portMAX_DELAYï¼Œå¦‚æœåº•å±‚æ’­æ”¾æ²¡æ’­å®Œï¼Œè¿™é‡Œä¼šè‡ªåŠ¨é˜»å¡ï¼Œå®Œç¾æ§åˆ¶ç½‘é€Ÿä¸æº¢å‡º
                 audio_driver_play(data->data_ptr, data->data_len);
             }
             break;
@@ -157,7 +157,7 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base, i
 }
 
 void app_main(void) {
-    // ? 1. ±ØĞëÏÈ³õÊ¼»¯ NVS£¬·ñÔò Wi-Fi ±Ø±ÀÀ££¡
+    // ? 1. å¿…é¡»å…ˆåˆå§‹åŒ– NVSï¼Œå¦åˆ™ Wi-Fi å¿…å´©æºƒï¼
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
       ESP_ERROR_CHECK(nvs_flash_erase());
@@ -165,14 +165,14 @@ void app_main(void) {
     }
     ESP_ERROR_CHECK(ret);
     my_ble_init("My_Smart_JARVIS");
-    ESP_LOGI(TAG, "1. Æô¶¯ÎïÀíÆÁÄ»Çı¶¯...");
+    ESP_LOGI(TAG, "1. å¯åŠ¨ç‰©ç†å±å¹•é©±åŠ¨...");
     lcd_init();
     
-    ESP_LOGI(TAG, "2. ³õÊ¼»¯ LVGL ÒÆÖ²²ã...");
+    ESP_LOGI(TAG, "2. åˆå§‹åŒ– LVGL ç§»æ¤å±‚...");
     lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     lvgl_port_init(&lvgl_cfg);
 
-    ESP_LOGI(TAG, "3. ½«ÆÁÄ»¹ÒÔØµ½ LVGL...");
+    ESP_LOGI(TAG, "3. å°†å±å¹•æŒ‚è½½åˆ° LVGL...");
     lvgl_port_display_cfg_t disp_cfg = {
         .io_handle = io_handle,
         .panel_handle = panel_handle,
@@ -185,43 +185,47 @@ void app_main(void) {
     };
     lvgl_port_add_disp(&disp_cfg);
     ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_handle, true, false));
-    set_default_time(); // ÉèÖÃÄ¬ÈÏÊ±¼ä£¬·ÀÖ¹ÎŞÍøÊ±ÏÔÊ¾ 1970 Äê
-    // Æô¶¯Äã¸Õ¸ÕĞ´ºÃµÄ´®¿ÚÄ£¿é
+    set_default_time(); // è®¾ç½®é»˜è®¤æ—¶é—´ï¼Œé˜²æ­¢æ— ç½‘æ—¶æ˜¾ç¤º 1970 å¹´
+
+    ESP_LOGI(TAG, "3.5 åˆå§‹åŒ– LVGL æ‰©å±•åº“ (SJPG/PNG/BMP è§£ç å™¨)...");
+    lv_extra_init();
+
+    // å¯åŠ¨ä½ åˆšåˆšå†™å¥½çš„ä¸²å£æ¨¡å—
     my_uart_init();
 
     // ==========================================
-    // ? ºËĞÄ´ó»»Ñª£ºÆô¶¯ UI ´ó¹Ü¼Ò
+    // ? æ ¸å¿ƒå¤§æ¢è¡€ï¼šå¯åŠ¨ UI å¤§ç®¡å®¶
     // ==========================================
-    ESP_LOGI(TAG, "Æô¶¯ UI ´ó¹Ü¼Ò...");
-    // ?? ×¢Òâ£º²»ÒªÔÚÕâÀï¼Ó lvgl_port_lock() ÁË£¡
-    // ÒòÎª ui_manager_init ÄÚ²¿ÒÑ¾­×Ô¼º¼ÓËø£¬²¢³õÊ¼»¯ÁËËùÓĞÆÁÄ»£¡
+    ESP_LOGI(TAG, "å¯åŠ¨ UI å¤§ç®¡å®¶...");
+    // ?? æ³¨æ„ï¼šä¸è¦åœ¨è¿™é‡ŒåŠ  lvgl_port_lock() äº†ï¼
+    // å› ä¸º ui_manager_init å†…éƒ¨å·²ç»è‡ªå·±åŠ é”ï¼Œå¹¶åˆå§‹åŒ–äº†æ‰€æœ‰å±å¹•ï¼
     ui_manager_init();
     
-    // 5. ³õÊ¼»¯Ó²¼ş I2C ×ÜÏß
+    // 5. åˆå§‹åŒ–ç¡¬ä»¶ I2C æ€»çº¿
     ESP_ERROR_CHECK(i2c_master_init());
-    ESP_LOGI(TAG, "I2C Ó²¼ş×ÜÏß³õÊ¼»¯Íê±Ï£¡");
+    ESP_LOGI(TAG, "I2C ç¡¬ä»¶æ€»çº¿åˆå§‹åŒ–å®Œæ¯•ï¼");
 
-    // 6. Á¬½Ó Wi-Fi (ÒÀÀµÇ°ÃæµÄ NVS ³õÊ¼»¯)
+    // 6. è¿æ¥ Wi-Fi (ä¾èµ–å‰é¢çš„ NVS åˆå§‹åŒ–)
     wifi_init_sta();
 
-    // 7. ³õÊ¼»¯´«¸ĞÆ÷
+    // 7. åˆå§‹åŒ–ä¼ æ„Ÿå™¨
     if (mpu6050_init_all() == ESP_OK) {
-        ESP_LOGI(TAG, "MPU6050 »½ĞÑ³É¹¦£¡");
+        ESP_LOGI(TAG, "MPU6050 å”¤é†’æˆåŠŸï¼");
     }
     if (max30105_init(I2C_MASTER_NUM) == ESP_OK) {
-        ESP_LOGI(TAG, "MAX30105 ÅäÖÃ³É¹¦£¡");
+        ESP_LOGI(TAG, "MAX30105 é…ç½®æˆåŠŸï¼");
     }
     if (bmp280_init(I2C_MASTER_NUM) == ESP_OK) {
-        ESP_LOGI(TAG, "BMP280 ÅäÖÃ³É¹¦£¡");
+        ESP_LOGI(TAG, "BMP280 é…ç½®æˆåŠŸï¼");
     }
 
-    // 8. ³õÊ¼»¯ÒôÆµÇı¶¯
+    // 8. åˆå§‹åŒ–éŸ³é¢‘é©±åŠ¨
     if (audio_driver_init() != ESP_OK) {
-        printf("? ÒôÆµÄ£¿é³õÊ¼»¯Ê§°Ü£¡Çë¼ì²éÈÕÖ¾¡£\n");
+        printf("? éŸ³é¢‘æ¨¡å—åˆå§‹åŒ–å¤±è´¥ï¼è¯·æ£€æŸ¥æ—¥å¿—ã€‚\n");
         return;
     }
     
-    // 9. ÅäÖÃ²¢Æô¶¯ WebSocket ¿Í»§¶Ë
+    // 9. é…ç½®å¹¶å¯åŠ¨ WebSocket å®¢æˆ·ç«¯
     esp_websocket_client_config_t websocket_cfg = {
         .uri = websocket_url,
         .reconnect_timeout_ms = 5000, 
@@ -230,18 +234,18 @@ void app_main(void) {
     esp_websocket_register_events(ws_client, WEBSOCKET_EVENT_ANY, websocket_event_handler, (void *)ws_client);
     esp_websocket_client_start(ws_client);
     app_mqtt_start();
-    time_sync_init(); // Æô¶¯Ê±¼äÍ¬²½£¬È·±£Ê±¼äÏÔÊ¾ÕıÈ·
-    // 10. ´´½¨´«¸ĞÆ÷¶ÁÈ¡ÈÎÎñ
-    // ?? ×¢Òâ£ºÇ°ÌáÊÇÄãÒÑ¾­ÔÚÆäËûÎÄ¼şÊµÏÖÁË read_mpu6050_task£¬·ñÔò±àÒë»á±¨´íÕÒ²»µ½¸Ãº¯Êı
+    time_sync_init(); // å¯åŠ¨æ—¶é—´åŒæ­¥ï¼Œç¡®ä¿æ—¶é—´æ˜¾ç¤ºæ­£ç¡®
+    // 10. åˆ›å»ºä¼ æ„Ÿå™¨è¯»å–ä»»åŠ¡
+    // ?? æ³¨æ„ï¼šå‰ææ˜¯ä½ å·²ç»åœ¨å…¶ä»–æ–‡ä»¶å®ç°äº† read_mpu6050_taskï¼Œå¦åˆ™ç¼–è¯‘ä¼šæŠ¥é”™æ‰¾ä¸åˆ°è¯¥å‡½æ•°
     xTaskCreate(read_mpu6050_task, "read_mpu6050_task", 4096, NULL, 5, NULL);
     xTaskCreate(read_max30105_task, "read_max30105_task", 4096, NULL, 6, NULL);
     xTaskCreate(read_bmp280_task, "read_bmp280_task", 4096, NULL, 4, NULL);
-    // ´´½¨Ê±¼äË¢ĞÂÈÎÎñ (·ÖÅä 2KB Õ»¿Õ¼ä£¬ÓÅÏÈ¼¶ÉèµÍÒ»µã±ÈÈç 2)
+    // åˆ›å»ºæ—¶é—´åˆ·æ–°ä»»åŠ¡ (åˆ†é… 2KB æ ˆç©ºé—´ï¼Œä¼˜å…ˆçº§è®¾ä½ä¸€ç‚¹æ¯”å¦‚ 2)
     xTaskCreate(ui_time_update_task, "ui_time_task", 1024 * 2, NULL, 2, NULL);
-    // 11. Ö÷Ñ­»·¹ÒÆğ
+    // 11. ä¸»å¾ªç¯æŒ‚èµ·
     while (1) {
         app_mqtt_publish("home/status/sensor", "TEMP:25C");
-         vTaskDelay(pdMS_TO_TICKS(1000));
-         vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }

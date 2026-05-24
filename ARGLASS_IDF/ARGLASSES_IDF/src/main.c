@@ -2,7 +2,7 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/semphr.h" // ✨ 引入信号量的头文件
+#include "freertos/semphr.h" // ? 引入信号量的头文件
 
 #include "esp_log.h"
 #include "nvs_flash.h"
@@ -25,19 +25,19 @@ esp_tts_handle_t *tts_handle = NULL;
 #include "speaker_app.h"
 #include "esp_camera.h"
 #include "sd_card_app.h" // ? 加上这句！引入 SD 卡模块
-#include "my_uart.h"    // ✨ 引入串口模块 (彻底替换了 app_mqtt.h)
+#include "my_uart.h"    // ? 引入串口模块 (彻底替换了 app_mqtt.h)
 #include "record_app.h" // ? 加上这句！引入录音模块
 #include "tts_app.h" // ? 加上这句！引入 TTS 模块
 #include "music_app.h" // ? 加上这句！引入音乐播放器模块
-// ✨ 引入环形缓冲区和数学库
+// ? 引入环形缓冲区和数学库
 #include "freertos/ringbuf.h" 
 #include <math.h>
-#include "voice_app.h" // ✨ 新增：引入你的 AI 语音大脑头文件
+#include "voice_app.h" // ? 新增：引入你的 AI 语音大脑头文件
 // 全局音频分发缓冲区
 RingbufHandle_t ws_ringbuf = NULL;
 RingbufHandle_t sd_ringbuf = NULL;
-RingbufHandle_t yin_ringbuf = NULL; // ✨ 新增：专为测音调准备的缓冲池
-RingbufHandle_t sr_ringbuf = NULL; // ✨ 新增：AI 语音识别专属缓冲池
+RingbufHandle_t yin_ringbuf = NULL; // ? 新增：专为测音调准备的缓冲池
+RingbufHandle_t sr_ringbuf = NULL; // ? 新增：AI 语音识别专属缓冲池
 static const char *TAG = "J.A.R.V.I.S";
 
 // ==========================================
@@ -67,7 +67,7 @@ void captureAndSend(void) {
     }
 }
 // ==========================================
-// 🧮 分贝 (噪声) 计算函数
+// ? 分贝 (噪声) 计算函数
 // ==========================================
 float calculate_decibel(int16_t *buffer, size_t samples) {
     if (samples == 0 || buffer == NULL) return 0.0f;
@@ -89,7 +89,7 @@ float calculate_decibel(int16_t *buffer, size_t samples) {
     return dbfs + 90.0f; // 90.0f 是硬件校准偏移量，可根据实际麦克风微调
 }
 // ==========================================
-// 🎵 频率转音调名称辅助函数
+// ? 频率转音调名称辅助函数
 // ==========================================
 const char* note_names[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 
@@ -104,12 +104,12 @@ void print_pitch_from_freq(float freq) {
     int octave = (midi_note / 12) - 1;
     float cents = (midi_float - midi_note) * 100.0f;
 
-    ESP_LOGI("PITCH", "🎵 频率: %5.1f Hz -> 音高: %2s%d (偏差: %4.1f cents)", 
+    ESP_LOGI("PITCH", "? 频率: %5.1f Hz -> 音高: %2s%d (偏差: %4.1f cents)", 
              freq, note_names[note_index], octave, cents);
 }
 
 // ==========================================
-// 🧮 YIN 时域自相关算法 (高精度提取基频)
+// ? YIN 时域自相关算法 (高精度提取基频)
 // ==========================================
 float calculate_pitch_yin(int16_t *buffer, size_t buffer_size, int sample_rate) {
     int half_size = buffer_size / 2;
@@ -165,13 +165,13 @@ float calculate_pitch_yin(int16_t *buffer, size_t buffer_size, int sample_rate) 
     return (float)sample_rate / better_tau;
 }
 // ==========================================
-// 👑 音频分发中心 (Audio Hub)
+// ? 音频分发中心 (Audio Hub)
 // ==========================================
 void audio_hub_task(void *pvParameters) {
     const size_t samples = 512;
     int16_t audioBuffer[samples];
 
-    ESP_LOGI("AUDIO_HUB", "🎙️ 麦克风核心采集枢纽已启动");
+    ESP_LOGI("AUDIO_HUB", "?? 麦克风核心采集枢纽已启动");
 
     while (1) {
         size_t bytesRead = readAudio(audioBuffer, samples);
@@ -191,14 +191,14 @@ void audio_hub_task(void *pvParameters) {
                 xRingbufferSend(sd_ringbuf, audioBuffer, bytesRead, 0);
             }
 
-            // ✨ 4. 发给 YIN 测音任务
+            // ? 4. 发给 YIN 测音任务
             // 如果只有声音大于 50dB 才发，可以省下一大笔计算资源
             if (yin_ringbuf != NULL && db_value > 35.0f) {
                 // 等待时间设为 0。如果 YIN 任务算得太慢导致池子满了，
                 // Hub 会直接丢弃这帧数据，绝不卡死自己！
                 xRingbufferSend(yin_ringbuf, audioBuffer, bytesRead, 0);
             }
-            // ✨ 4. 无情地把声音灌给 AI 引擎
+            // ? 4. 无情地把声音灌给 AI 引擎
             if (sr_ringbuf != NULL) {
                 // 等待时间设为 0。AI 处理不过来自动丢弃，绝不卡死 Hub
                 xRingbufferSend(sr_ringbuf, audioBuffer, bytesRead, 0); 
@@ -239,7 +239,7 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base, i
 }
 
 // ==========================================
-// 🚀 WebSocket 推流专员 (只管发，不碰硬件)
+// ? WebSocket 推流专员 (只管发，不碰硬件)
 // ==========================================
 void audio_tx_task(void *pvParameters) {
     size_t item_size;
@@ -258,13 +258,13 @@ void audio_tx_task(void *pvParameters) {
     }
 }
 // ==========================================
-// 🚀 独立任务：小说读取与发送专员
+// ? 独立任务：小说读取与发送专员
 // ==========================================
 void novel_read_task(void *pvParameters) {
     ESP_LOGI("NOVEL_TASK", "小说读取子任务已启动，正在待命...");
 
     while (1) {
-        // 🚦 核心：在这里等信号，不干活时完全不占 CPU
+        // ? 核心：在这里等信号，不干活时完全不占 CPU
         if (xSemaphoreTake(next_page_sem, portMAX_DELAY) == pdTRUE) {
             
             ESP_LOGI("NOVEL_TASK", "收到翻页信号，开始工作...");
@@ -280,7 +280,7 @@ void novel_read_task(void *pvParameters) {
     vTaskDelete(NULL);
 }
 // ==========================================
-// 🎸 独立任务：高精度绝对音感提取 (YIN) (已修复死锁漏洞)
+// ? 独立任务：高精度绝对音感提取 (YIN) (已修复死锁漏洞)
 // ==========================================
 void yin_pitch_task(void *pvParameters) {
     const size_t target_samples = 2048; // 每次攒够 2048 个点算一次
@@ -288,7 +288,7 @@ void yin_pitch_task(void *pvParameters) {
     size_t current_count = 0;
     size_t item_size;
 
-    ESP_LOGI("YIN_TASK", "🎵 独立测音任务已启动，正在后台监听...");
+    ESP_LOGI("YIN_TASK", "? 独立测音任务已启动，正在后台监听...");
 
     while (1) {
         // 从专属缓冲池里捞数据
@@ -297,7 +297,7 @@ void yin_pitch_task(void *pvParameters) {
         if (audio_data != NULL) {
             size_t samples_received = item_size / sizeof(int16_t);
 
-            // 🌟 修复核心：计算水池还能装多少，哪怕溢出了也只取需要的部分填满
+            // ? 修复核心：计算水池还能装多少，哪怕溢出了也只取需要的部分填满
             size_t space_left = target_samples - current_count;
             size_t samples_to_copy = (samples_received < space_left) ? samples_received : space_left;
 
@@ -313,12 +313,12 @@ void yin_pitch_task(void *pvParameters) {
                 float exact_freq = calculate_pitch_yin(accum_buffer, target_samples, 16000);
                 
                 if (exact_freq > 20.0f) {
-                    //ESP_LOGI("PITCH_RESULT", "🔥 抓到声音了！当前主频率: %.2f Hz", exact_freq);
+                    //ESP_LOGI("PITCH_RESULT", "? 抓到声音了！当前主频率: %.2f Hz", exact_freq);
                     print_pitch_from_freq(exact_freq); 
                 }
                 else {
                     // 如果环境全是呼呼的风声底噪，YIN 算法会返回 0，这句一定会打印！
-                    // ESP_LOGW("PITCH_RESULT", "🤔 声音杂乱无固定周期 (非乐音)");
+                    // ESP_LOGW("PITCH_RESULT", "? 声音杂乱无固定周期 (非乐音)");
                 }
                 
                 // 清空水池，准备攒下一波
@@ -342,14 +342,14 @@ void app_main(void) {
     speaker_mutex = xSemaphoreCreateMutex();
     
     if (speaker_mutex == NULL) {
-        ESP_LOGE("MAIN", "❌ 致命错误：喇叭互斥锁创建失败！");
+        ESP_LOGE("MAIN", "? 致命错误：喇叭互斥锁创建失败！");
         return; // 如果锁没造出来，后面的系统就别跑了
     }
     // 调用模块暴露的接口
     if (init_sd_card() == ESP_OK) {
         test_sd_card_read_write();
     } else {
-        ESP_LOGE(TAG, "⚠️ SD 卡模块异常，跳过后续依赖任务...");
+        ESP_LOGE(TAG, "?? SD 卡模块异常，跳过后续依赖任务...");
     }
     // 创建环形缓冲区，每个分配 10KB 大小，足以缓冲数个音频帧
     // NOSPLIT 类型保证每次存入的一帧数据被完整取出
@@ -358,7 +358,7 @@ void app_main(void) {
     yin_ringbuf = xRingbufferCreate(8192, RINGBUF_TYPE_NOSPLIT);
     sr_ringbuf = xRingbufferCreate(16384, RINGBUF_TYPE_NOSPLIT);
     if (ws_ringbuf == NULL || sd_ringbuf == NULL) {
-        ESP_LOGE(TAG, "❌ 致命错误：音频环形缓冲区创建失败！");
+        ESP_LOGE(TAG, "? 致命错误：音频环形缓冲区创建失败！");
         return;
     }
     // ==========================================
@@ -373,7 +373,7 @@ void app_main(void) {
     initAudio();
     initSpeaker();
     // 2. 初始化引擎
-   init_tts_engine();
+    init_tts_engine();
     start_jarvis_brain();
     // 3. 运行业务
     
@@ -395,8 +395,9 @@ void app_main(void) {
     // 启动连接
     esp_websocket_client_start(ws_client);
     my_uart_init();
+    take_photo_to_PZ_folder();
     // 4. 开启独立线程：无情地抓取麦克风数据发给基站
-// 🌟 核心救命代码：强制绑定到 Core 1 (参数最后的 1) 🌟
+// ? 核心救命代码：强制绑定到 Core 1 (参数最后的 1) ?
     
     // 1. 麦克风核心采集任务 (代替硬件读取硬件)
     xTaskCreatePinnedToCore(audio_hub_task, "audio_hub", 8192, NULL, 5, NULL, 1);
@@ -408,21 +409,7 @@ void app_main(void) {
     xTaskCreatePinnedToCore(novel_read_task, "novel_task", 4096 * 2, NULL, 4, NULL, 1);
     xTaskCreatePinnedToCore(yin_pitch_task, "yin_task", 8192, NULL, 3, NULL, 1);
     tts_speak("贾维斯系统已启动。主脑连接成功，正在等待指令。");
-    // // 2. 愉快的业务逻辑演示
-    // ESP_LOGI(TAG, "准备开始第一段录音...");
-    // 
-    
-    //start_music_player(MOUNT_POINT "/music1.wav"); // 从 SD 卡播放音乐
-    // ESP_LOGI(TAG, "休息 3 秒钟...");
-    // vTaskDelay(pdMS_TO_TICKS(1000));
-    // take_photo_and_save(); // 自动保存为 IMG_002.jpg
-    // vTaskDelay(pdMS_TO_TICKS(3000)); // 必须给上一个文件一点点收尾时间，顺便休息下
-
-    // ESP_LOGI(TAG, "准备开始第二段录音...");
-    start_record(); // 它会自动变成 REC_002.wav
-    vTaskDelay(pdMS_TO_TICKS(15000)); // 录 3 秒
-    stop_record();
-    // 主线程可在此挂起
+   // 主线程可在此挂起
     while(1) {
         my_uart_send("TEMP:52");
         vTaskDelay(pdMS_TO_TICKS(10000)); 

@@ -12,10 +12,11 @@
 #include "audio_app.h"
 #include "esp_camera.h"
 #include "freertos/ringbuf.h"
+#include <dirent.h> 
+#include "my_uart.h" // 确保引入了串口模块 
 
 // 引入 main.c 中创建的全局 RingBuffer 和状态
 extern RingbufHandle_t sd_ringbuf; 
-
 
 static const char *TAG = "RECORD_APP";
 
@@ -56,14 +57,20 @@ static void write_wav_header(FILE* f, uint32_t sample_rate, uint16_t bits_per_sa
 }
 
 // ==========================================
-// 🔍 内部函数：自动获取下一个不冲突的文件名
+// 🔍 内部函数：自动获取下一个不冲突的文件名 (保存至 ly 文件夹)
 // ==========================================
 static void get_next_filename(char *out_filepath, size_t max_len) {
+    // ✨ 核心保护：自动创建 ly 文件夹（如果已存在则会被自动忽略）
+    char dir_path[64];
+    snprintf(dir_path, sizeof(dir_path), "%s/ly", MOUNT_POINT);
+    mkdir(dir_path, 0777); 
+
     struct stat st;
     int file_index = 1;
     
     while (file_index <= 9999) { 
-        snprintf(out_filepath, max_len, "%s/REC_%03d.wav", MOUNT_POINT, file_index);
+        // ✨ 修改路径，加入 /ly/
+        snprintf(out_filepath, max_len, "%s/ly/REC_%03d.wav", MOUNT_POINT, file_index);
         if (stat(out_filepath, &st) != 0) {
             break; 
         }
@@ -123,7 +130,7 @@ esp_err_t start_record(void) {
     
     record_file = fopen(filepath, "wb");
     if (!record_file) {
-        ESP_LOGE(TAG, "❌ 无法创建录音文件！");
+        ESP_LOGE(TAG, "❌ 无法创建录音文件！请检查 SD 卡及目录权限。");
         return ESP_FAIL;
     }
 
@@ -149,15 +156,20 @@ void stop_record(void) {
 }
 
 // ==========================================
-// 🔍 内部函数：自动获取下一个不冲突的照片名
+// 🔍 内部函数：自动获取下一个不冲突的照片名 (保存至 ly 文件夹)
 // ==========================================
 static void get_next_img_filename(char *out_filepath, size_t max_len) {
+    // ✨ 核心保护：自动创建 ly 文件夹
+    char dir_path[64];
+    snprintf(dir_path, sizeof(dir_path), "%s/ly", MOUNT_POINT);
+    mkdir(dir_path, 0777);
+
     struct stat st;
     int file_index = 1;
     
     while (file_index <= 9999) { 
-        // 生成如 /sdcard/IMG_001.jpg 的名字
-        snprintf(out_filepath, max_len, "%s/IMG_%03d.jpg", MOUNT_POINT, file_index);
+        // ✨ 修改路径，加入 /ly/
+        snprintf(out_filepath, max_len, "%s/ly/IMG_%03d.jpg", MOUNT_POINT, file_index);
         if (stat(out_filepath, &st) != 0) {
             break; // 找到空闲名字
         }
@@ -202,4 +214,42 @@ esp_err_t take_photo_and_save(void) {
     
     return ESP_OK;
 }
+// ========================================== 
+// 📂 扫描 ly 文件夹并通过串口发送文件列表 
+// ========================================== 
+void scan_and_send_record_list(void) { 
+    char dir_path[64]; 
+    snprintf(dir_path, sizeof(dir_path), "%s/ly", MOUNT_POINT); 
 
+    DIR *dir = opendir(dir_path); 
+    if (!dir) { 
+        ESP_LOGE("RECORD_APP", "❌ 无法打开 ly 文件夹"); 
+        my_uart_send("CMD:CLEAR_LIST\r\n"); 
+        vTaskDelay(pdMS_TO_TICKS(20)); // ✨ 新增延时
+        my_uart_send("CMD:LIST_END\r\n"); 
+        return; 
+    } 
+
+    // 1. 告诉 UI 准备接收新列表 
+    my_uart_send("CMD:CLEAR_LIST\r\n"); 
+    vTaskDelay(pdMS_TO_TICKS(20)); // ✨ 新增延时，防止和后面的文件粘包
+
+    struct dirent *entry; 
+    char uart_buf[512]; 
+    
+    // 2. 遍历文件夹里的所有文件 
+    while ((entry = readdir(dir)) != NULL) { 
+        size_t len = strlen(entry->d_name);
+        if (len > 4 && strcasecmp(entry->d_name + len - 4, ".wav") == 0) { 
+            snprintf(uart_buf, sizeof(uart_buf), "REC_FILE:%s\r\n", entry->d_name); 
+            my_uart_send(uart_buf); 
+            vTaskDelay(pdMS_TO_TICKS(20)); // ✨ 保持延时 
+        } 
+    } 
+    closedir(dir); 
+
+    // 3. 告诉 UI 发送完毕 
+    my_uart_send("CMD:LIST_END\r\n"); 
+    vTaskDelay(pdMS_TO_TICKS(20)); // ✨ 新增延时
+    ESP_LOGI("RECORD_APP", "📁 录音列表发送完毕"); 
+}

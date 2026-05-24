@@ -1,4 +1,4 @@
 idf_component_register(SRCS "record_app.c"
                        INCLUDE_DIRS "."
-                       # ¸æËß±àÒëÆ÷£º±¾Ä£¿éÐèÒªÊ¹ÓÃ SD¿¨¡¢ÒôÆµ ÒÔ¼° ¹Ù·½ÉãÏñÍ·µ×²ãÇý¶¯
-                       REQUIRES sd_card_app audio_app esp32-camera)
+                       # ï¿½ï¿½ï¿½ß±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä£ï¿½ï¿½ï¿½ï¿½ÒªÊ¹ï¿½ï¿½ SDï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æµ ï¿½Ô¼ï¿½ ï¿½Ù·ï¿½ï¿½ï¿½ï¿½ï¿½Í·ï¿½×²ï¿½ï¿½ï¿½ï¿½ï¿½
+                       REQUIRES sd_card_app audio_app esp32-camera my_uart)

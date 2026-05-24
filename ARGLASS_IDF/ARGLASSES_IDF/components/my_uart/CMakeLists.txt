@@ -1,4 +1,4 @@
 
 idf_component_register(SRCS "my_uart.c"
                     INCLUDE_DIRS "." 
-                    REQUIRES driver sd_card_app)
+                    REQUIRES driver sd_card_app record_app music_app)

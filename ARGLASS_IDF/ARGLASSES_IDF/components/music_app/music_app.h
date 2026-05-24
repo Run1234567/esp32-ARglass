@@ -6,10 +6,15 @@ extern "C" {
 #endif
 
 /**
- * @brief Æô¶¯ÒôÀÖ²¥·ÅÆ÷ (ºóÌ¨ÈÎÎñ)
- * @param path SD¿¨ÖĞWAVÒôÀÖÎÄ¼şµÄ¾ø¶ÔÂ·¾¶£¬ÀıÈç "/sdcard/music.wav"
+ * @brief å¯åŠ¨éŸ³ä¹æ’­æ”¾å™¨ (åå°ä»»åŠ¡)
+ * @param path SDå¡ä¸ŠWAVéŸ³é¢‘æ–‡ä»¶çš„ç»å¯¹è·¯å¾„ï¼Œå¦‚ "/sdcard/music.wav"
  */
 void start_music_player(const char *path);
+
+/**
+ * @brief åœæ­¢éŸ³ä¹æ’­æ”¾ (ä¸­é€”åˆ¹è½¦)
+ */
+void stop_music_player(void);
 
 #ifdef __cplusplus
 }

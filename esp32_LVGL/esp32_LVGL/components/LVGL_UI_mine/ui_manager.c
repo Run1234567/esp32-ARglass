@@ -8,6 +8,10 @@
 #include "ui_menu_screen.h"
 #include "ui_novel_screen.h"
 #include "ui_clock_screen.h" 
+#include "ui_record_screen.h" // ? 新增
+#include "ui_playlist_screen.h" // ✨ 引入
+#include "ui_camera_screen.h" // ✨ 引入相机界面
+#include "my_uart.h" // ✨ 引入串口，用于获取列表
 
 static const char *TAG = "UI_MANAGER";
 
@@ -27,11 +31,17 @@ void switch_to_screen(ui_screen_state_t target_screen) {
         case SCREEN_MAIN_AR: target_obj = ui_main_screen; break;
         case SCREEN_MENU:    target_obj = ui_menu_screen; break;
         case SCREEN_NOVEL:   target_obj = ui_novel_screen; break;
-        case SCREEN_CLOCK:   target_obj = ui_clock_screen; break; // ? 新增
+        case SCREEN_CLOCK:   target_obj = ui_clock_screen; break;
+        case SCREEN_RECORD:  target_obj = ui_record_screen; break;
+        case SCREEN_PLAYLIST: target_obj = ui_playlist_screen; break;
+        case SCREEN_CAMERA:  target_obj = ui_camera_screen; break;
         default: return;
     }
 
-    // 切换屏幕 (无动画，AR 眼镜追求瞬间响应)
+    if (target_screen == SCREEN_PLAYLIST) {
+        my_uart_send("CMD:GET_REC_LIST\r\n");
+    }
+
     lv_scr_load_anim(target_obj, LV_SCR_LOAD_ANIM_NONE, 0, 0, false);
     current_screen = target_screen;
     ESP_LOGI(TAG, "? 屏幕切换至: %d", current_screen);
@@ -69,9 +79,12 @@ static void process_ui_command(ui_cmd_t cmd) {
                 // 右滑确认，根据当前滚轮索引进相应的 APP
                 uint16_t selected_idx = lv_roller_get_selected(menu_roller);
                 if (selected_idx == 0) switch_to_screen(SCREEN_MAIN_AR);
-                if (selected_idx == 2) switch_to_screen(SCREEN_CLOCK); // ? 选中第3项进时钟
-                // 1 是健康，2 是 AI 对话 (预留)
-                if (selected_idx == 3) switch_to_screen(SCREEN_NOVEL); // 进系统设置/小说
+                if (selected_idx == 2) switch_to_screen(SCREEN_CLOCK); // ✨ 选中第3项进时钟
+                if (selected_idx == 3) switch_to_screen(SCREEN_RECORD); // ✨ 选中第4项进录音
+                if (selected_idx == 4) switch_to_screen(SCREEN_PLAYLIST); // ✨ 选中第5项进回放
+                if (selected_idx == 5) switch_to_screen(SCREEN_CAMERA); // ✨ 选中第6项进相机
+                // 1 是健康，6 是 AI 对话 (预留)
+                if (selected_idx == 7) switch_to_screen(SCREEN_NOVEL); // 进系统设置/小说
             }
             break;
 
@@ -88,6 +101,18 @@ static void process_ui_command(ui_cmd_t cmd) {
         // ------------------------------------------------
         case SCREEN_CLOCK:
             clock_screen_handle_cmd(cmd); // ? 直接把手势交给时钟模块
+            break;
+
+        case SCREEN_RECORD:
+            record_screen_handle_cmd(cmd); // ✨ 直接把手势交给录音模块
+            break;
+
+        case SCREEN_PLAYLIST:
+            playlist_screen_handle_cmd(cmd); // ✨ 直接把手势交给回放模块
+            break;
+
+        case SCREEN_CAMERA:
+            camera_screen_handle_cmd(cmd); // ✨ 直接把手势交给相机模块
             break;
 
         default:
@@ -123,7 +148,10 @@ void ui_manager_init(void) {
         ui_ar_glass_init();
         ui_menu_screen_init();
         ui_novel_screen_init();
-        ui_clock_screen_init(); // ? 新增
+        ui_clock_screen_init(); // ✨ 新增
+        ui_record_screen_init(); // ✨ 新增
+        ui_playlist_screen_init(); // ✨ 新增
+        ui_camera_screen_init(); // ✨ 新增：相机界面初始化
         
         // 初始显示主屏幕
         lv_scr_load(ui_main_screen);

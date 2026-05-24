@@ -1,177 +1,177 @@
 #include "ui_clock_screen.h"
 #include "ui_globals.h"
 #include <stdio.h>
-#include <time.h>        // ? ĞÂÔö£ºÎªÁË»ñÈ¡ÏµÍ³Ê±¼ä 
-#include <sys/time.h>    // ? ĞÂÔö£ºÎªÁË»ñÈ¡ÏµÍ³Ê±¼ä 
+#include <time.h>        // ? æ–°å¢ï¼šä¸ºäº†è·å–ç³»ç»Ÿæ—¶é—´ 
+#include <sys/time.h>    // ? æ–°å¢ï¼šä¸ºäº†è·å–ç³»ç»Ÿæ—¶é—´ 
 
-// ? ¶¨ÒåÊÀ½çÊ±¼ä½á¹¹Ìå 
+// ? å®šä¹‰ä¸–ç•Œæ—¶é—´ç»“æ„ä½“ 
 typedef struct { 
     const char * name; 
-    int offset; // Ïà¶Ô UTC µÄÆ«ÒÆĞ¡Ê±Êı 
+    int offset; // ç›¸å¯¹ UTC çš„åç§»å°æ—¶æ•° 
 } city_time_t; 
  
-// ¾«Ñ¡ 12 ¸öÖøÃû³ÇÊĞ/Ê±Çø 
+// ç²¾é€‰ 12 ä¸ªè‘—ååŸå¸‚/æ—¶åŒº 
 static const city_time_t world_cities[] = { 
-    {"?? ±±¾© (CST)", 8}, 
-    {"?? ¶«¾© (JST)", 9}, 
-    {"?? Ï¤Äá (AEST)", 10}, 
-    {"?? °Â¿ËÀ¼ (NZDT)", 12}, 
-    {"?? µÏ°İ (GST)", 4}, 
-    {"?? ÄªË¹¿Æ (MSK)", 3}, 
-    {"?? °ÍÀè (CET)", 1}, 
-    {"?? Â×¶Ø (GMT)", 0}, 
-    {"?? ÀïÔ¼ÈÈÄÚÂ¬", -3}, 
-    {"?? Å¦Ô¼ (EST)", -5}, 
-    {"?? ÂåÉ¼í¶ (PST)", -8}, 
-    {"?? ÏÄÍşÒÄ (HST)", -10} 
+    {"?? åŒ—äº¬ (CST)", 8}, 
+    {"?? ä¸œäº¬ (JST)", 9}, 
+    {"?? æ‚‰å°¼ (AEST)", 10}, 
+    {"?? å¥¥å…‹å…° (NZDT)", 12}, 
+    {"?? è¿ªæ‹œ (GST)", 4}, 
+    {"?? è«æ–¯ç§‘ (MSK)", 3}, 
+    {"?? å·´é» (CET)", 1}, 
+    {"?? ä¼¦æ•¦ (GMT)", 0}, 
+    {"?? é‡Œçº¦çƒ­å†…å¢", -3}, 
+    {"?? çº½çº¦ (EST)", -5}, 
+    {"?? æ´›æ‰çŸ¶ (PST)", -8}, 
+    {"?? å¤å¨å¤· (HST)", -10} 
 }; 
  
-// ºê¶¨Òå£º¼ÆËãÊı×é³¤¶È 
+// å®å®šä¹‰ï¼šè®¡ç®—æ•°ç»„é•¿åº¦ 
 #define WORLD_CITY_COUNT (sizeof(world_cities) / sizeof(world_cities[0])) 
-static uint8_t world_city_idx = 0; // Ä¬ÈÏË÷Òı 0 (±±¾©) 
+static uint8_t world_city_idx = 0; // é»˜è®¤ç´¢å¼• 0 (åŒ—äº¬) 
 
 lv_obj_t * ui_clock_screen;
 static lv_obj_t * label_clock_title;
-static lv_obj_t * label_clock_content; // Í³Ò»ÓÃÒ»¸ö Label ÏÔÊ¾Êı×ÖºÍÖĞÎÄÌáÊ¾
+static lv_obj_t * label_clock_content; // ç»Ÿä¸€ç”¨ä¸€ä¸ª Label æ˜¾ç¤ºæ•°å­—å’Œä¸­æ–‡æç¤º
 
-// 0=ÄÖÖÓ, 1=Ãë±í, 2=ÊÀ½çÊ±¼ä, 3=µ¹¼ÆÊ±
+// 0=é—¹é’Ÿ, 1=ç§’è¡¨, 2=ä¸–ç•Œæ—¶é—´, 3=å€’è®¡æ—¶
 static uint8_t sub_mode = 0; 
-// 0: ä¯ÀÀ²ã, 1: ÏêÇé/±à¼­²ã
+// 0: æµè§ˆå±‚, 1: è¯¦æƒ…/ç¼–è¾‘å±‚
 static uint8_t view_level = 0; 
-// 0: Î´±à¼­, 1: ±à¼­·ÖÖÓ, 2: ±à¼­ÃëÊı
+// 0: æœªç¼–è¾‘, 1: ç¼–è¾‘åˆ†é’Ÿ, 2: ç¼–è¾‘ç§’æ•°
 static uint8_t edit_state = 0; 
 static bool is_running = false;
 
-// ? ĞÂÔö£ºÄÖÖÓµÄºËĞÄ±äÁ¿ 
-static uint8_t alarm_h = 8;          // Ä¬ÈÏÔçÉÏ 8 µã 
-static uint8_t alarm_m = 0;          // Ä¬ÈÏ 0 ·Ö 
-static bool alarm_enabled = false;   // Ä¬ÈÏ¹Ø±Õ 
-static bool alarm_is_ringing = false;// µ±Ç°ÊÇ·ñÕıÔÚÏìÁå£¡ 
+// ? æ–°å¢ï¼šé—¹é’Ÿçš„æ ¸å¿ƒå˜é‡ 
+static uint8_t alarm_h = 8;          // é»˜è®¤æ—©ä¸Š 8 ç‚¹ 
+static uint8_t alarm_m = 0;          // é»˜è®¤ 0 åˆ† 
+static bool alarm_enabled = false;   // é»˜è®¤å…³é—­ 
+static bool alarm_is_ringing = false;// å½“å‰æ˜¯å¦æ­£åœ¨å“é“ƒï¼ 
 
-// ºËĞÄÊ±¼ä±äÁ¿
+// æ ¸å¿ƒæ—¶é—´å˜é‡
 static uint32_t stopwatch_ms = 0;
 static uint32_t countdown_ms = 3 * 60 * 1000; 
 static lv_timer_t * timer_handle = NULL;
 
 // ==========================================
-// ? Ë¢ĞÂ UI ÏÔÊ¾ (È«ÖĞÎÄ + ÑÕÉ«¸ßÁÁ)
+// ? åˆ·æ–° UI æ˜¾ç¤º (å…¨ä¸­æ–‡ + é¢œè‰²é«˜äº®)
 // ==========================================
 static void update_clock_display(void) {
     char buf[128];
     
-    // ?? ¼«Æä¹Ø¼ü£º±ØĞë¿ªÆô´ËÑ¡Ïî£¬LVGL ²Å»á½âÎö #FFFF00 ÕâÖÖÑÕÉ«´úÂë£¡
+    // ?? æå…¶å…³é”®ï¼šå¿…é¡»å¼€å¯æ­¤é€‰é¡¹ï¼ŒLVGL æ‰ä¼šè§£æ #FFFF00 è¿™ç§é¢œè‰²ä»£ç ï¼
     lv_label_set_recolor(label_clock_content, true);
 
     // ------------------------------------
-    // ¡¾²ã¼¶ 0¡¿ä¯ÀÀÔ¤ÀÀ½çÃæ
+    // ã€å±‚çº§ 0ã€‘æµè§ˆé¢„è§ˆç•Œé¢
     // ------------------------------------
     if (view_level == 0) {
         lv_obj_set_style_text_color(label_clock_content, lv_color_hex(0x888888), 0); 
         switch (sub_mode) {
-            // ? ĞŞ¸Ä£ºÄÖÖÓÔ¤ÀÀÄÜÖ±½Ó¿´µ½Éè¶¨µÄÊ±¼äºÍ×´Ì¬ 
+            // ? ä¿®æ”¹ï¼šé—¹é’Ÿé¢„è§ˆèƒ½ç›´æ¥çœ‹åˆ°è®¾å®šçš„æ—¶é—´å’ŒçŠ¶æ€ 
             case 0: 
-                lv_label_set_text(label_clock_title, "? ÄÖÖÓ"); 
-                sprintf(buf, "%02d:%02d (%s)\nÓÒ»¬½øÈë", alarm_h, alarm_m, alarm_enabled ? "¿ª" : "¹Ø"); 
+                lv_label_set_text(label_clock_title, "? é—¹é’Ÿ"); 
+                sprintf(buf, "%02d:%02d (%s)\nå³æ»‘è¿›å…¥", alarm_h, alarm_m, alarm_enabled ? "å¼€" : "å…³"); 
                 break; 
-            case 1: lv_label_set_text(label_clock_title, "?? Ãë±í"); sprintf(buf, "00:00.0\nÓÒ»¬½øÈë"); break;
-            // ? ĞŞ¸Ä£ºÊÀ½çÊ±¼äÔ¤ÀÀ½çÃæÏÔÊ¾µ±Ç°Ñ¡ÖĞµÄ³ÇÊĞ 
+            case 1: lv_label_set_text(label_clock_title, "?? ç§’è¡¨"); sprintf(buf, "00:00.0\nå³æ»‘è¿›å…¥"); break;
+            // ? ä¿®æ”¹ï¼šä¸–ç•Œæ—¶é—´é¢„è§ˆç•Œé¢æ˜¾ç¤ºå½“å‰é€‰ä¸­çš„åŸå¸‚ 
             case 2: 
-                lv_label_set_text(label_clock_title, "? ÊÀ½çÊ±¼ä"); 
-                sprintf(buf, "%s\nÓÒ»¬²é¿´", world_cities[world_city_idx].name); 
+                lv_label_set_text(label_clock_title, "? ä¸–ç•Œæ—¶é—´"); 
+                sprintf(buf, "%s\nå³æ»‘æŸ¥çœ‹", world_cities[world_city_idx].name); 
                 break; 
-            case 3: lv_label_set_text(label_clock_title, "? µ¹¼ÆÊ±"); sprintf(buf, "03:00.0\nÓÒ»¬½øÈë"); break;
+            case 3: lv_label_set_text(label_clock_title, "? å€’è®¡æ—¶"); sprintf(buf, "03:00.0\nå³æ»‘è¿›å…¥"); break;
         }
         lv_label_set_text(label_clock_content, buf);
         return;
     }
 
     // ------------------------------------
-    // ¡¾²ã¼¶ 1¡¿ÕæÊµ²Ù×÷½çÃæ
+    // ã€å±‚çº§ 1ã€‘çœŸå®æ“ä½œç•Œé¢
     // ------------------------------------
     lv_obj_set_style_text_color(label_clock_content, lv_color_white(), 0); 
 
     if (sub_mode == 0) { 
-        // ?¡¾ÄÖÖÓ½çÃæ¡¿ 
+        // ?ã€é—¹é’Ÿç•Œé¢ã€‘ 
         if (alarm_is_ringing) { 
-            // ÏìÁåÊ±µÄ±©×ß×´Ì¬£ºÈ«ºì£¡ 
-            sprintf(buf, "#FF0000 %02d:%02d#\n#FF0000 ? Æğ´²À²£¡#\n×ó»¬/ÓÒ»¬ ¹Ø±Õ", alarm_h, alarm_m); 
+            // å“é“ƒæ—¶çš„æš´èµ°çŠ¶æ€ï¼šå…¨çº¢ï¼ 
+            sprintf(buf, "#FF0000 %02d:%02d#\n#FF0000 ? èµ·åºŠå•¦ï¼#\nå·¦æ»‘/å³æ»‘ å…³é—­", alarm_h, alarm_m); 
         } else { 
-            // Õı³£±à¼­Óë²é¿´×´Ì¬ 
+            // æ­£å¸¸ç¼–è¾‘ä¸æŸ¥çœ‹çŠ¶æ€ 
             if (edit_state == 1) { 
-                sprintf(buf, "#FFFF00 %02d#:%02d\nÉÏÏÂµ÷Õû [Ğ¡Ê±]", alarm_h, alarm_m); 
+                sprintf(buf, "#FFFF00 %02d#:%02d\nä¸Šä¸‹è°ƒæ•´ [å°æ—¶]", alarm_h, alarm_m); 
             } else if (edit_state == 2) { 
-                sprintf(buf, "%02d:#FFFF00 %02d#\nÉÏÏÂµ÷Õû [·ÖÖÓ]", alarm_h, alarm_m); 
+                sprintf(buf, "%02d:#FFFF00 %02d#\nä¸Šä¸‹è°ƒæ•´ [åˆ†é’Ÿ]", alarm_h, alarm_m); 
             } else if (edit_state == 3) { 
-                // ½¹µãÔÚ¿ª¹ØÉÏ 
-                sprintf(buf, "%02d:%02d\n×´Ì¬: %s", alarm_h, alarm_m, alarm_enabled ? "#FFFF00 [¿ªÆô]#" : "#FFFF00 [¹Ø±Õ]#"); 
+                // ç„¦ç‚¹åœ¨å¼€å…³ä¸Š 
+                sprintf(buf, "%02d:%02d\nçŠ¶æ€: %s", alarm_h, alarm_m, alarm_enabled ? "#FFFF00 [å¼€å¯]#" : "#FFFF00 [å…³é—­]#"); 
             } else { 
-                // Î´±à¼­×´Ì¬ 
-                sprintf(buf, "%02d:%02d\n%s", alarm_h, alarm_m, alarm_enabled ? "#00FF00 ÒÑ¿ªÆô#" : "ÓÒ»¬½øÈë±à¼­"); 
+                // æœªç¼–è¾‘çŠ¶æ€ 
+                sprintf(buf, "%02d:%02d\n%s", alarm_h, alarm_m, alarm_enabled ? "#00FF00 å·²å¼€å¯#" : "å³æ»‘è¿›å…¥ç¼–è¾‘"); 
             } 
         } 
     } 
     else if (sub_mode == 1) { 
-        // ??¡¾Ãë±í½çÃæ¡¿
+        // ??ã€ç§’è¡¨ç•Œé¢ã€‘
         int min = (stopwatch_ms / 60000) % 60;
         int sec = (stopwatch_ms / 1000) % 60;
         int ms_100 = (stopwatch_ms % 1000) / 100;
-        sprintf(buf, "%02d:%02d.%d\n%s", min, sec, ms_100, is_running ? "#00FF00 ÔËĞĞÖĞ#" : "#888888 ÒÑÔİÍ£#");
+        sprintf(buf, "%02d:%02d.%d\n%s", min, sec, ms_100, is_running ? "#00FF00 è¿è¡Œä¸­#" : "#888888 å·²æš‚åœ#");
     } 
     else if (sub_mode == 2) { 
-        // ?¡¾ÊÀ½çÊ±¼ä½çÃæ¡¿ 
+        // ?ã€ä¸–ç•Œæ—¶é—´ç•Œé¢ã€‘ 
         time_t now; 
-        time(&now); // »ñÈ¡×Ô 1970 ÄêÒÔÀ´µÄÃëÊı (UTC) 
+        time(&now); // è·å–è‡ª 1970 å¹´ä»¥æ¥çš„ç§’æ•° (UTC) 
          
-        // ºËĞÄÄ§·¨£ºµ±Ç° UTC Ê±¼ä + Ä¿±ê³ÇÊĞµÄÆ«ÒÆÃëÊı 
+        // æ ¸å¿ƒé­”æ³•ï¼šå½“å‰ UTC æ—¶é—´ + ç›®æ ‡åŸå¸‚çš„åç§»ç§’æ•° 
         time_t target_time = now + (world_cities[world_city_idx].offset * 3600); 
          
         struct tm target_tm; 
-        // Ê¹ÓÃ gmtime_r (»ñÈ¡¸ñÁÖÍşÖÎ±ê×¼Ê±¼ä)£¬±ÜÃâÊÜµ½ÏµÍ³Ê±Çø (TZ) µÄ¸ÉÈÅ 
+        // ä½¿ç”¨ gmtime_r (è·å–æ ¼æ—å¨æ²»æ ‡å‡†æ—¶é—´)ï¼Œé¿å…å—åˆ°ç³»ç»Ÿæ—¶åŒº (TZ) çš„å¹²æ‰° 
         gmtime_r(&target_time, &target_tm); 
          
-        // ³ÇÊĞÃû±ê»Æ£¬ÏÂ·½ÏÔÊ¾ HH:MM:SS£¬×îÏÂ·½ÌáÊ¾²Ù×÷ 
-        sprintf(buf, "#FFFF00 %s#\n%02d:%02d:%02d\nÉÏÏÂÇĞ»»³ÇÊĞ", 
+        // åŸå¸‚åæ ‡é»„ï¼Œä¸‹æ–¹æ˜¾ç¤º HH:MM:SSï¼Œæœ€ä¸‹æ–¹æç¤ºæ“ä½œ 
+        sprintf(buf, "#FFFF00 %s#\n%02d:%02d:%02d\nä¸Šä¸‹åˆ‡æ¢åŸå¸‚", 
                 world_cities[world_city_idx].name, 
                 target_tm.tm_hour, target_tm.tm_min, target_tm.tm_sec); 
     } 
     else if (sub_mode == 3) { 
-        // ?¡¾µ¹¼ÆÊ±½çÃæ¡¿
+        // ?ã€å€’è®¡æ—¶ç•Œé¢ã€‘
         int min = (countdown_ms / 60000) % 99;
         int sec = (countdown_ms / 1000) % 60;
         
-        // ºËĞÄ£º¸ù¾İ±à¼­×´Ì¬£¬ÓÃ»ÆÉ«¸ßÁÁ¶ÔÓ¦µÄÊı×Ö
+        // æ ¸å¿ƒï¼šæ ¹æ®ç¼–è¾‘çŠ¶æ€ï¼Œç”¨é»„è‰²é«˜äº®å¯¹åº”çš„æ•°å­—
         if (edit_state == 1) {
-            sprintf(buf, "#FFFF00 %02d#:%02d\nÉÏÏÂµ÷Õû·ÖÖÓ", min, sec);
+            sprintf(buf, "#FFFF00 %02d#:%02d\nä¸Šä¸‹è°ƒæ•´åˆ†é’Ÿ", min, sec);
         } else if (edit_state == 2) {
-            sprintf(buf, "%02d:#FFFF00 %02d#\nÉÏÏÂµ÷ÕûÃëÊı", min, sec);
+            sprintf(buf, "%02d:#FFFF00 %02d#\nä¸Šä¸‹è°ƒæ•´ç§’æ•°", min, sec);
         } else {
-            sprintf(buf, "%02d:%02d.0\n%s", min, sec, is_running ? "#00FF00 ÔËĞĞÖĞ#" : "ÓÒ»¬½øÈë±à¼­");
+            sprintf(buf, "%02d:%02d.0\n%s", min, sec, is_running ? "#00FF00 è¿è¡Œä¸­#" : "å³æ»‘è¿›å…¥ç¼–è¾‘");
         }
     }
     else {
-        sprintf(buf, "--:--\nÕıÔÚ¿ª·¢ÖĞ");
+        sprintf(buf, "--:--\næ­£åœ¨å¼€å‘ä¸­");
     }
     
     lv_label_set_text(label_clock_content, buf);
 }
 
 // ==========================================
-// ?? ¶¨Ê±Æ÷ĞÄÌø»Øµ÷
+// ?? å®šæ—¶å™¨å¿ƒè·³å›è°ƒ
 // ==========================================
 static void clock_timer_cb(lv_timer_t * timer) {
-    // ? ĞÂÔö£ºÈ«¾ÖÄÖÖÓ¼àÌı (²»ÊÜ is_running ºÍ view_level µÄÏŞÖÆ) 
+    // ? æ–°å¢ï¼šå…¨å±€é—¹é’Ÿç›‘å¬ (ä¸å— is_running å’Œ view_level çš„é™åˆ¶) 
     static uint8_t tick_1s = 0; 
     tick_1s++; 
-    if (tick_1s >= 10) { // 100ms * 10 = 1ÃëÖÓ²éÒ»´Î¸Ú 
+    if (tick_1s >= 10) { // 100ms * 10 = 1ç§’é’ŸæŸ¥ä¸€æ¬¡å²— 
         tick_1s = 0; 
          
-        // »ñÈ¡µ×²ãÕæÊµÏµÍ³Ê±¼ä 
+        // è·å–åº•å±‚çœŸå®ç³»ç»Ÿæ—¶é—´ 
         time_t now; 
         struct tm timeinfo; 
         time(&now); 
         localtime_r(&now, &timeinfo); 
  
-        // Èç¹ûÄÖÖÓ¿ªÆôÁË£¬Ã»ÔÚÏì£¬¶øÇÒ Ê±:·Ö:00 Ãë ÍêÃÀ¶ÔÆë 
+        // å¦‚æœé—¹é’Ÿå¼€å¯äº†ï¼Œæ²¡åœ¨å“ï¼Œè€Œä¸” æ—¶:åˆ†:00 ç§’ å®Œç¾å¯¹é½ 
         if (alarm_enabled && !alarm_is_ringing && 
             timeinfo.tm_hour == alarm_h && 
             timeinfo.tm_min == alarm_m && 
@@ -179,23 +179,23 @@ static void clock_timer_cb(lv_timer_t * timer) {
              
             alarm_is_ringing = true; 
              
-            // °ÔµÀÂß¼­£ºÎŞÂÛÓÃ»§ÔÚ¿´É¶£¬Ç¿ĞĞ°ÑÆÁÄ»ÇĞµ½ÄÖÖÓ½çÃæ£¡ 
+            // éœ¸é“é€»è¾‘ï¼šæ— è®ºç”¨æˆ·åœ¨çœ‹å•¥ï¼Œå¼ºè¡ŒæŠŠå±å¹•åˆ‡åˆ°é—¹é’Ÿç•Œé¢ï¼ 
             extern void switch_to_screen(ui_screen_state_t target); 
             switch_to_screen(SCREEN_CLOCK); 
              
-            view_level = 1; // Ç¿ĞĞ½øÈëÏêÇé²ã 
-            sub_mode = 0;   // Ç¿ĞĞÇĞµ½ÄÖÖÓ×ÓÄ£Ê½ 
+            view_level = 1; // å¼ºè¡Œè¿›å…¥è¯¦æƒ…å±‚ 
+            sub_mode = 0;   // å¼ºè¡Œåˆ‡åˆ°é—¹é’Ÿå­æ¨¡å¼ 
              
-            // TODO: ÔÚÕâÀïµ÷ÓÃÄãµÄ app_mqtt ÍùÍâ·¢Í¨Öª£¬»òÕßÆô¶¯·äÃùÆ÷ 
+            // TODO: åœ¨è¿™é‡Œè°ƒç”¨ä½ çš„ app_mqtt å¾€å¤–å‘é€šçŸ¥ï¼Œæˆ–è€…å¯åŠ¨èœ‚é¸£å™¨ 
             // app_mqtt_publish("jarvis/alarm", "RINGING"); 
              
-            update_clock_display(); // Ë¢ĞÂÆÁÄ»±äºì 
+            update_clock_display(); // åˆ·æ–°å±å¹•å˜çº¢ 
         } 
     } 
 
-    if (view_level == 0) return; // Èç¹ûÔÚÔ¤ÀÀ½çÃæ£¬²»ÓÃ¿ñË¢ÆÁÄ» 
+    if (view_level == 0) return; // å¦‚æœåœ¨é¢„è§ˆç•Œé¢ï¼Œä¸ç”¨ç‹‚åˆ·å±å¹• 
 
-    // ? ĞÂÔö£ºÈç¹ûÊÇÊÀ½çÊ±¼ä£¬Ã¿Ãë×Ô¶¯Ë¢ĞÂÒ»´ÎÆÁÄ»£¬ÈÃÃëÖÓÌøÆğÀ´£¡ 
+    // ? æ–°å¢ï¼šå¦‚æœæ˜¯ä¸–ç•Œæ—¶é—´ï¼Œæ¯ç§’è‡ªåŠ¨åˆ·æ–°ä¸€æ¬¡å±å¹•ï¼Œè®©ç§’é’Ÿè·³èµ·æ¥ï¼ 
     if (sub_mode == 2) { 
         static uint8_t wt_tick = 0; 
         wt_tick++; 
@@ -208,24 +208,24 @@ static void clock_timer_cb(lv_timer_t * timer) {
 
     if (!is_running) return;
 
-    if (sub_mode == 1) { // Ãë±í
+    if (sub_mode == 1) { // ç§’è¡¨
         stopwatch_ms += 100;
         update_clock_display();
     } 
-    else if (sub_mode == 3) { // µ¹¼ÆÊ±
+    else if (sub_mode == 3) { // å€’è®¡æ—¶
         if (countdown_ms >= 100) {
             countdown_ms -= 100;
             update_clock_display();
         } else {
             is_running = false;
             lv_label_set_recolor(label_clock_content, true);
-            lv_label_set_text(label_clock_content, "#FF0000 00:00.0\nÊ±¼äµ½£¡#");
+            lv_label_set_text(label_clock_content, "#FF0000 00:00.0\næ—¶é—´åˆ°ï¼#");
         }
     }
 }
 
 // ==========================================
-// ? ºËĞÄÖ¸ÁîÂ·ÓÉ
+// ? æ ¸å¿ƒæŒ‡ä»¤è·¯ç”±
 // ==========================================
 void clock_screen_handle_cmd(ui_cmd_t cmd) {
     if (view_level == 0) {
@@ -241,68 +241,68 @@ void clock_screen_handle_cmd(ui_cmd_t cmd) {
     }
 
     // ------------------------------------
-    // ²ã¼¶ 1£ºÕæÊµ¹¦ÄÜ²Ù×÷Ä£Ê½ 
+    // å±‚çº§ 1ï¼šçœŸå®åŠŸèƒ½æ“ä½œæ¨¡å¼ 
     // ------------------------------------
 
-    // ?¡¾ÄÖÖÓÂß¼­¡¿ 
+    // ?ã€é—¹é’Ÿé€»è¾‘ã€‘ 
     if (sub_mode == 0) { 
-        // Èç¹ûÕıÔÚÏìÁå£¬Ëæ±ã°´×ó»òÓÒ¶¼¿ÉÒÔ¹Ø±ÕÄÖÖÓ£¡ 
+        // å¦‚æœæ­£åœ¨å“é“ƒï¼Œéšä¾¿æŒ‰å·¦æˆ–å³éƒ½å¯ä»¥å…³é—­é—¹é’Ÿï¼ 
         if (alarm_is_ringing) { 
             if (cmd == UI_CMD_LEFT || cmd == UI_CMD_RIGHT) { 
                 alarm_is_ringing = false; 
-                alarm_enabled = false; // ÏìÍê×Ô¶¯¹Øµô 
-                view_level = 0;        // ÍË»ØÔ¤ÀÀ²ã 
+                alarm_enabled = false; // å“å®Œè‡ªåŠ¨å…³æ‰ 
+                view_level = 0;        // é€€å›é¢„è§ˆå±‚ 
                 update_clock_display(); 
             } 
-            return; // ÏìÁåÊ±ÆÁ±ÎÆäËû²Ù×÷ 
+            return; // å“é“ƒæ—¶å±è”½å…¶ä»–æ“ä½œ 
         } 
  
-        if (edit_state == 0) { // Î´±à¼­×´Ì¬ 
-            if (cmd == UI_CMD_RIGHT) edit_state = 1; // ÓÒ»¬½øÈë±à¼­ (¸ÄĞ¡Ê±) 
-            if (cmd == UI_CMD_LEFT)  view_level = 0; // ×ó»¬ÍË»ØÔ¤ÀÀ 
+        if (edit_state == 0) { // æœªç¼–è¾‘çŠ¶æ€ 
+            if (cmd == UI_CMD_RIGHT) edit_state = 1; // å³æ»‘è¿›å…¥ç¼–è¾‘ (æ”¹å°æ—¶) 
+            if (cmd == UI_CMD_LEFT)  view_level = 0; // å·¦æ»‘é€€å›é¢„è§ˆ 
         } 
-        else { // ÕıÔÚ±à¼­ÖĞ 
+        else { // æ­£åœ¨ç¼–è¾‘ä¸­ 
             if (cmd == UI_CMD_UP || cmd == UI_CMD_DOWN) { 
                 int offset = (cmd == UI_CMD_UP) ? 1 : -1; 
                  
-                if (edit_state == 1) { // µ÷Ğ¡Ê± (0-23) 
+                if (edit_state == 1) { // è°ƒå°æ—¶ (0-23) 
                     if (offset > 0) alarm_h = (alarm_h + 1) % 24; 
                     else alarm_h = (alarm_h == 0) ? 23 : alarm_h - 1; 
                 } 
-                else if (edit_state == 2) { // µ÷·ÖÖÓ (0-59) 
+                else if (edit_state == 2) { // è°ƒåˆ†é’Ÿ (0-59) 
                     if (offset > 0) alarm_m = (alarm_m + 1) % 60; 
                     else alarm_m = (alarm_m == 0) ? 59 : alarm_m - 1; 
                 } 
-                else if (edit_state == 3) { // µ÷¿ª¹Ø 
+                else if (edit_state == 3) { // è°ƒå¼€å…³ 
                     alarm_enabled = !alarm_enabled; 
                 } 
             } 
             if (cmd == UI_CMD_RIGHT) { 
-                edit_state++; // ½¹µã£ºĞ¡Ê± -> ·ÖÖÓ -> ¿ª¹Ø -> Íê³É 
-                if (edit_state > 3) edit_state = 0; // ÍË³ö±à¼­ 
+                edit_state++; // ç„¦ç‚¹ï¼šå°æ—¶ -> åˆ†é’Ÿ -> å¼€å…³ -> å®Œæˆ 
+                if (edit_state > 3) edit_state = 0; // é€€å‡ºç¼–è¾‘ 
             } 
             if (cmd == UI_CMD_LEFT) { 
-                edit_state = 0; // ËæÊ±È¡Ïû±à¼­ 
+                edit_state = 0; // éšæ—¶å–æ¶ˆç¼–è¾‘ 
             } 
         } 
     } 
-    // ?¡¾ÊÀ½çÊ±¼äÂß¼­¡¿ 
+    // ?ã€ä¸–ç•Œæ—¶é—´é€»è¾‘ã€‘ 
     else if (sub_mode == 2) { 
         if (cmd == UI_CMD_UP) { 
-            // ÉÏ»Ó£ºÇĞ»»ÉÏÒ»¸ö³ÇÊĞ (´¦ÀíË÷Òı 0 µÄÏÂÒçÎÊÌâ) 
+            // ä¸ŠæŒ¥ï¼šåˆ‡æ¢ä¸Šä¸€ä¸ªåŸå¸‚ (å¤„ç†ç´¢å¼• 0 çš„ä¸‹æº¢é—®é¢˜) 
             world_city_idx = (world_city_idx == 0) ? WORLD_CITY_COUNT - 1 : world_city_idx - 1; 
         } 
         else if (cmd == UI_CMD_DOWN) { 
-            // ÏÂ»Ó£ºÇĞ»»ÏÂÒ»¸ö³ÇÊĞ 
+            // ä¸‹æŒ¥ï¼šåˆ‡æ¢ä¸‹ä¸€ä¸ªåŸå¸‚ 
             world_city_idx = (world_city_idx + 1) % WORLD_CITY_COUNT; 
         } 
         else if (cmd == UI_CMD_LEFT) { 
-            // ×ó»Ó£ºÍË³öµ½Ô¤ÀÀ½çÃæ 
+            // å·¦æŒ¥ï¼šé€€å‡ºåˆ°é¢„è§ˆç•Œé¢ 
             view_level = 0; 
         } 
-        // ÓÒ»Ó²»ĞèÒª×öÌØ±ğ´¦Àí£¬¿ÉÒÔÔÚÕâÀïÖ±½ÓÆÁ±Î 
+        // å³æŒ¥ä¸éœ€è¦åšç‰¹åˆ«å¤„ç†ï¼Œå¯ä»¥åœ¨è¿™é‡Œç›´æ¥å±è”½ 
     } 
-    else if (sub_mode == 3) { // µ¹¼ÆÊ±
+    else if (sub_mode == 3) { // å€’è®¡æ—¶
         if (edit_state == 0) { 
             if (cmd == UI_CMD_RIGHT) {
                 if (!is_running) edit_state = 1; 
@@ -330,7 +330,7 @@ void clock_screen_handle_cmd(ui_cmd_t cmd) {
             if (cmd == UI_CMD_LEFT) edit_state = 0; 
         }
     }
-    else if (sub_mode == 1) { // Ãë±í
+    else if (sub_mode == 1) { // ç§’è¡¨
         if (cmd == UI_CMD_RIGHT) is_running = !is_running; 
         if (cmd == UI_CMD_LEFT) {
             if (is_running) is_running = false; 
@@ -346,24 +346,24 @@ void clock_screen_handle_cmd(ui_cmd_t cmd) {
 }
 
 // ==========================================
-// ? ³õÊ¼»¯½çÃæ
+// ? åˆå§‹åŒ–ç•Œé¢
 // ==========================================
 void ui_clock_screen_init(void) {
     ui_clock_screen = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(ui_clock_screen, lv_color_black(), 0);
 
     label_clock_title = lv_label_create(ui_clock_screen);
-    lv_obj_set_style_text_font(label_clock_title, &my_font_cn_16, 0); // ÓÃÄãµÄÈ«ÄÜ×Ö¿â
+    lv_obj_set_style_text_font(label_clock_title, &my_font_cn_16, 0); // ç”¨ä½ çš„å…¨èƒ½å­—åº“
     lv_obj_set_style_text_color(label_clock_title, lv_color_hex(0x00FF00), 0);
     lv_obj_align(label_clock_title, LV_ALIGN_TOP_MID, 0, 20);
 
     label_clock_content = lv_label_create(ui_clock_screen);
-    lv_obj_set_style_text_font(label_clock_content, &my_font_cn_16, 0); // Ò²ÊÇÄãµÄ×Ö¿â
+    lv_obj_set_style_text_font(label_clock_content, &my_font_cn_16, 0); // ä¹Ÿæ˜¯ä½ çš„å­—åº“
     lv_obj_set_style_text_color(label_clock_content, lv_color_white(), 0);
     lv_obj_align(label_clock_content, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_text_align(label_clock_content, LV_TEXT_ALIGN_CENTER, 0);
     
-    // ĞĞ¼ä¾àµ÷´óÒ»µã£¬ÈÃÊı×ÖºÍÏÂ·½ÌáÊ¾²»ÄÇÃ´¼·
+    // è¡Œé—´è·è°ƒå¤§ä¸€ç‚¹ï¼Œè®©æ•°å­—å’Œä¸‹æ–¹æç¤ºä¸é‚£ä¹ˆæŒ¤
     lv_obj_set_style_text_line_space(label_clock_content, 10, 0);
 
     view_level = 0;
