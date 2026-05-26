@@ -38,13 +38,7 @@ const char* websocket_url = "ws://124.220.224.189:8765/";
 esp_websocket_client_handle_t ws_client;
 LV_FONT_DECLARE(my_font_cn_16);
 
-#define SAMPLE_RATE 16000       // 采样率必须和 audio_driver.c 里配置的一致
-#define FREQUENCY 440.0         // 测试音频频率 440Hz (标准音A)
-#define AMPLITUDE 8000          // 音量大小 (16位PCM最大是32767，8000是一个适中且不刺耳的音量)
-#define BUFFER_SAMPLES 512      // 每次计算/发送的采样点数
 
-// 定义一个双声道音频缓冲区 (每个采样点16位，左声道+右声道，所以数组大小要乘以2)
-int16_t audio_buffer[BUFFER_SAMPLES * 2];
 
 // 统一的 I2C 引脚和参数配置（根据你 MPU6050 里的设置提取出来）
 #define I2C_MASTER_SCL_IO           1

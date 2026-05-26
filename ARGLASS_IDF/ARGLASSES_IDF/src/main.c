@@ -41,6 +41,7 @@ RingbufHandle_t sr_ringbuf = NULL; // ? 新增：AI 语音识别专属缓冲池
 static const char *TAG = "J.A.R.V.I.S";
 
 volatile bool send_noise_data = false;
+volatile bool send_pitch_data = false;
 
 // ==========================================
 // ?? 您的专属配置 ??
@@ -328,7 +329,17 @@ void yin_pitch_task(void *pvParameters) {
                 
                 if (exact_freq > 20.0f) {
                     //ESP_LOGI("PITCH_RESULT", "? 抓到声音了！当前主频率: %.2f Hz", exact_freq);
-                    print_pitch_from_freq(exact_freq); 
+                    print_pitch_from_freq(exact_freq);
+
+                    if (send_pitch_data) {
+                        static TickType_t last_p_time = 0;
+                        if (xTaskGetTickCount() - last_p_time > pdMS_TO_TICKS(100)) {
+                            char p_cmd[20];
+                            snprintf(p_cmd, sizeof(p_cmd), "PH:%.1f", exact_freq);
+                            my_uart_send(p_cmd);
+                            last_p_time = xTaskGetTickCount();
+                        }
+                    }
                 }
                 else {
                     // 如果环境全是呼呼的风声底噪，YIN 算法会返回 0，这句一定会打印！

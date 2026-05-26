@@ -12,6 +12,8 @@
 #include "ui_playlist_screen.h" // ✨ 引入
 #include "ui_camera_screen.h" // ✨ 引入相机界面
 #include "ui_noise_screen.h" // noise meter
+#include "ui_pitch_screen.h" // pitch detector
+#include "ui_music_screen.h" // music player
 #include "my_uart.h" // ✨ 引入串口，用于获取列表
 
 static const char *TAG = "UI_MANAGER";
@@ -37,6 +39,8 @@ void switch_to_screen(ui_screen_state_t target_screen) {
         case SCREEN_PLAYLIST: target_obj = ui_playlist_screen; break;
         case SCREEN_CAMERA:  target_obj = ui_camera_screen; break;
         case SCREEN_NOISE:   target_obj = ui_noise_screen; break;
+        case SCREEN_PITCH:   target_obj = ui_pitch_screen; break;
+        case SCREEN_MUSIC:   target_obj = ui_music_screen; break;
         default: return;
     }
 
@@ -44,8 +48,16 @@ void switch_to_screen(ui_screen_state_t target_screen) {
         my_uart_send("CMD:GET_REC_LIST\r\n");
     }
 
+    if (target_screen == SCREEN_MUSIC) {
+        my_uart_send("CMD:GET_MUSIC_LIST\r\n");
+    }
+
     if (current_screen == SCREEN_NOISE && target_screen != SCREEN_NOISE) {
         my_uart_send("CMD:NOISE_OFF\r\n");
+    }
+
+    if (current_screen == SCREEN_PITCH && target_screen != SCREEN_PITCH) {
+        my_uart_send("CMD:PITCH_OFF\r\n");
     }
 
     lv_scr_load_anim(target_obj, LV_SCR_LOAD_ANIM_NONE, 0, 0, false);
@@ -53,6 +65,10 @@ void switch_to_screen(ui_screen_state_t target_screen) {
 
     if (current_screen == SCREEN_NOISE) {
         my_uart_send("CMD:NOISE_ON\r\n");
+    }
+
+    if (current_screen == SCREEN_PITCH) {
+        my_uart_send("CMD:PITCH_ON\r\n");
     }
 
     ESP_LOGI(TAG, "? 屏幕切换至: %d", current_screen);
@@ -94,9 +110,11 @@ static void process_ui_command(ui_cmd_t cmd) {
                 if (selected_idx == 3) switch_to_screen(SCREEN_RECORD); // ✨ 选中第4项进录音
                 if (selected_idx == 4) switch_to_screen(SCREEN_PLAYLIST); // ✨ 选中第5项进回放
                 if (selected_idx == 5) switch_to_screen(SCREEN_CAMERA); // ✨ 选中第6项进相机
-                if (selected_idx == 7) switch_to_screen(SCREEN_NOISE); // 选中第8项进噪声监测
+                if (selected_idx == 7) switch_to_screen(SCREEN_MUSIC); // 选中第8项进音乐舱
+                if (selected_idx == 8) switch_to_screen(SCREEN_PITCH); // 选中第9项进音调检测
+                if (selected_idx == 9) switch_to_screen(SCREEN_NOISE); // 选中第10项进噪声监测
                 // 1 是健康，6 是 AI 对话 (预留)
-                if (selected_idx == 8) switch_to_screen(SCREEN_NOVEL); // 进系统设置/小说
+                if (selected_idx == 10) switch_to_screen(SCREEN_NOVEL); // 进系统设置/小说
             }
             break;
 
@@ -129,6 +147,14 @@ static void process_ui_command(ui_cmd_t cmd) {
 
         case SCREEN_NOISE:
             if (cmd == UI_CMD_LEFT) switch_to_screen(SCREEN_MENU);
+            break;
+
+        case SCREEN_PITCH:
+            if (cmd == UI_CMD_LEFT) switch_to_screen(SCREEN_MENU);
+            break;
+
+        case SCREEN_MUSIC:
+            music_screen_handle_cmd(cmd);
             break;
 
         default:
@@ -169,6 +195,8 @@ void ui_manager_init(void) {
         ui_playlist_screen_init(); // ✨ 新增
         ui_camera_screen_init(); // ✨ 新增：相机界面初始化
         ui_noise_screen_init(); // noise meter
+        ui_pitch_screen_init(); // pitch detector
+        ui_music_screen_init(); // music player
         
         // 初始显示主屏幕
         lv_scr_load(ui_main_screen);

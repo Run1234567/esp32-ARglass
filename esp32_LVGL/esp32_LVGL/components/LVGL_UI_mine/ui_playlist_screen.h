@@ -14,5 +14,6 @@ void playlist_clear(void);
 void playlist_add_file(const char* filename);
 void playlist_update_ui(void);
 void playlist_set_total_time(int t_sec);
+void playlist_update_progress(int cur_sec);
 
 #endif

@@ -13,8 +13,7 @@
 
 static const char *TAG = "MY_UART";
 
-#define BUF_SIZE (4096)
-#define RD_BUF_SIZE (BUF_SIZE)
+#define RD_BUF_SIZE (4096)
 static QueueHandle_t uart_queue;
 
 // ✨ 声明外部全局开关：记录当前是否允许语音播报
@@ -120,10 +119,40 @@ static void uart_event_task(void *pvParameters)
                     else if (strstr((char*)dtmp, "CMD:SEEK_MUSIC:") != NULL) {
                         char *val_str = strstr((char*)dtmp, "CMD:SEEK_MUSIC:") + 15;
                         extern void seek_music_player(int sec);
-                        seek_music_player(atoi(val_str)); // 字符串转整数
+                        seek_music_player(atoi(val_str));
                     }
                     else if (strstr((char*)dtmp, "CMD:STOP_MUSIC") != NULL) {
                         extern void stop_music_player(void); stop_music_player();
+                    }
+                    else if (strstr((char*)dtmp, "CMD:GET_MUSIC_LIST") != NULL) {
+                        ESP_LOGI(TAG, "   收到 UI 指令：请求扫描 YY 文件夹歌单");
+                        extern void scan_and_send_music_list(void);
+                        scan_and_send_music_list();
+                    }
+                    else if (strstr((char*)dtmp, "CMD:PLAY_YY:") != NULL) {
+                        char *filename = strstr((char*)dtmp, "CMD:PLAY_YY:") + 12;
+                        for(int i = 0; i < strlen(filename); i++) {
+                            if(filename[i] == '\r' || filename[i] == '\n') {
+                                filename[i] = '\0';
+                                break;
+                            }
+                        }
+                        char full_path[128];
+                        snprintf(full_path, sizeof(full_path), "%s/YY/%s", MOUNT_POINT, filename);
+
+                        ESP_LOGI(TAG, "▶️ 准备播放音乐: %s", full_path);
+                        
+                        extern void send_lrc_to_ui(const char* song_name);
+                        send_lrc_to_ui(filename);
+
+                        extern void start_music_player(const char *path);
+                        start_music_player(full_path);
+                    }
+                    else if (strstr((char*)dtmp, "CMD:VOL:") != NULL) {
+                        int vol = atoi(strstr((char*)dtmp, "CMD:VOL:") + 8);
+                        extern void set_music_volume(int vol);
+                        set_music_volume(vol);
+                        ESP_LOGI(TAG, "   音量设置为: %d%%", vol);
                     }
 
                     // ==========================================
@@ -147,6 +176,20 @@ static void uart_event_task(void *pvParameters)
                         extern volatile bool send_noise_data;
                         send_noise_data = false;
                         ESP_LOGI(TAG, "🔴 收到 UI 指令：停止发送噪声数据");
+                    }
+
+                    // ==========================================
+                    // ✨ 音调检测界面订阅协议
+                    // ==========================================
+                    else if (strstr((char*)dtmp, "CMD:PITCH_ON") != NULL) {
+                        extern volatile bool send_pitch_data;
+                        send_pitch_data = true;
+                        ESP_LOGI(TAG, "🟢 收到 UI 指令：开启音调检测流");
+                    }
+                    else if (strstr((char*)dtmp, "CMD:PITCH_OFF") != NULL) {
+                        extern volatile bool send_pitch_data;
+                        send_pitch_data = false;
+                        ESP_LOGI(TAG, "🔴 收到 UI 指令：关闭音调检测流");
                     }
                     break;
                 case UART_FIFO_OVF:

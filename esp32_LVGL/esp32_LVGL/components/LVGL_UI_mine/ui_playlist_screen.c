@@ -49,6 +49,15 @@ void playlist_set_total_time(int t_sec) {
     }
 }
 
+void playlist_update_progress(int cur_sec) {
+    if (lvgl_port_lock(0)) {
+        current_sec = cur_sec;
+        if (current_sec > total_sec) current_sec = total_sec;
+        update_time_label();
+        lvgl_port_unlock();
+    }
+}
+
 void playlist_clear(void) { playlist_options[0] = '\0'; }
 void playlist_add_file(const char* filename) {
     char clean_name[64];

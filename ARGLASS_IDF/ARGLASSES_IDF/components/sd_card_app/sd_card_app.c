@@ -1,15 +1,19 @@
 #include <stdio.h> 
 #include <string.h> 
+#include <dirent.h>
 #include "esp_log.h" 
 #include "esp_vfs_fat.h" 
 #include "sdmmc_cmd.h" 
 #include "driver/sdmmc_host.h" 
 #include "driver/gpio.h" 
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
 // 引入自己的头文件 
 #include "sd_card_app.h" 
-#include "tts_app.h"        // ✨ 你的发声引擎 
-#include "my_uart.h"        // ✨ 引入串口模块 (彻底替换了 app_mqtt.h) 
+#include "tts_app.h"
+#include "my_uart.h" 
 
 static const char *TAG = "SD_APP" ; 
 
@@ -176,4 +180,83 @@ void test_read_novel_next_chunk(void) {
     } else { 
         ESP_LOGI("SD_READ", "🔇 语音已关闭，本次只发文字不发声"); 
     }
-} 
+}
+
+// ==========================================
+//   扫描 YY 文件夹并发送音乐列表给 UI
+// ==========================================
+void scan_and_send_music_list(void) {
+    char dir_path[64];
+    snprintf(dir_path, sizeof(dir_path), "%s/YY", MOUNT_POINT);
+
+    DIR *dir = opendir(dir_path);
+    if (dir == NULL) {
+        ESP_LOGE(TAG, "无法打开 %s 文件夹！", dir_path);
+        return;
+    }
+
+    struct dirent *ent;
+
+    my_uart_send("MU_CLEAR:1");
+
+    while ((ent = readdir(dir)) != NULL) {
+        if (strstr(ent->d_name, ".mp3") || strstr(ent->d_name, ".MP3") ||
+            strstr(ent->d_name, ".wav") || strstr(ent->d_name, ".WAV")) {
+            char cmd[300];
+            snprintf(cmd, sizeof(cmd), "MU:%s", ent->d_name);
+            my_uart_send(cmd);
+            vTaskDelay(pdMS_TO_TICKS(20));
+        }
+    }
+    closedir(dir);
+
+    my_uart_send("MU_END:1");
+    ESP_LOGI(TAG, "音乐列表扫描完成并已发送");
+}
+
+// ==========================================
+//   读取 SD 卡同名词文件并通过串口发给 UI
+// ==========================================
+void send_lrc_to_ui(const char* song_name) {
+    char lrc_path[128];
+    snprintf(lrc_path, sizeof(lrc_path), "%s/YY/%s", MOUNT_POINT, song_name);
+    
+    char *ext = strrchr(lrc_path, '.');
+    if (ext != NULL) {
+        strcpy(ext, ".lrc");
+    }
+
+    my_uart_send("LRC_CLR\r\n");
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    FILE *f = fopen(lrc_path, "r");
+    if (f == NULL) {
+        ESP_LOGE(TAG, "❌ 找不到配套歌词: %s", lrc_path);
+        return;
+    }
+
+    ESP_LOGI(TAG, "📖 找到歌词文件，开始推送到 UI...");
+    char line_buf[256];
+    while (fgets(line_buf, sizeof(line_buf), f) != NULL) {
+        int m = 0, s = 0;
+        if (sscanf(line_buf, "[%d:%d", &m, &s) == 2) {
+            char *text_start = strchr(line_buf, ']');
+            if (text_start != NULL) {
+                text_start++;
+                while(*text_start == ' ') text_start++;
+                text_start[strcspn(text_start, "\r\n")] = '\0';
+                
+                if (strlen(text_start) == 0) text_start = " ";
+
+                int time_sec = m * 60 + s;
+                char cmd[300];
+                snprintf(cmd, sizeof(cmd), "LRC:%d:%s\r\n", time_sec, text_start);
+                my_uart_send(cmd);
+                
+                vTaskDelay(pdMS_TO_TICKS(15));
+            }
+        }
+    }
+    fclose(f);
+    ESP_LOGI(TAG, "✅ 歌词推送完成！");
+}

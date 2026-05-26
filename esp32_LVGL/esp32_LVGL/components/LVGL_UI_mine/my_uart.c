@@ -56,6 +56,24 @@ static void uart_event_task(void *pvParameters) {
                         extern void playlist_set_total_time(int t_sec);
                         playlist_set_total_time(atoi(strstr((char*)dtmp, "AUDIO_INFO:TOTAL:") + 17));
                     }
+                    else if (strncmp((char*)dtmp, "AUDIO_INFO:TOT:", 15) == 0) {
+                        int t_sec = atoi((char*)dtmp + 15);
+                        
+                        extern void playlist_set_total_time(int t_sec);
+                        playlist_set_total_time(t_sec);
+                        
+                        extern void music_set_total_time(int t_sec);
+                        music_set_total_time(t_sec);
+                    }
+                    else if (strncmp((char*)dtmp, "AUDIO_INFO:CUR:", 15) == 0) {
+                        int cur_sec = atoi((char*)dtmp + 15);
+                        
+                        extern void playlist_update_progress(int cur_sec);
+                        playlist_update_progress(cur_sec);
+                        
+                        extern void music_update_progress(int cur_sec);
+                        music_update_progress(cur_sec);
+                    }
                     else if (strstr((char*)dtmp, "CMD:PHOTO_DONE") != NULL) {
                         extern void camera_reset_status_label(void);
                         camera_reset_status_label();
@@ -65,6 +83,44 @@ static void uart_event_task(void *pvParameters) {
                         extern void update_noise_meter(int val);
                         update_noise_meter(db_value);
                     }
+                    else if (strncmp((char*)dtmp, "PH:", 3) == 0) {
+                        float freq = atof((char*)dtmp + 3);
+                        extern void update_pitch_ui(float freq);
+                        update_pitch_ui(freq);
+                    }
+                    else if (strstr((char*)dtmp, "MU_CLEAR:1") != NULL) {
+                        extern void music_clear_playlist(void);
+                        music_clear_playlist();
+                    }
+                    else if (strncmp((char*)dtmp, "MU:", 3) == 0) {
+                        char *song_name = (char*)dtmp + 3;
+                        for (int i = 0; i < strlen(song_name); i++) {
+                            if (song_name[i] == '\r' || song_name[i] == '\n') {
+                                song_name[i] = '\0'; break;
+                            }
+                        }
+                        extern void music_add_song(const char* name);
+                        music_add_song(song_name);
+                    }
+                    else if (strstr((char*)dtmp, "MU_END:1") != NULL) {
+                        extern void music_apply_playlist(void);
+                        music_apply_playlist();
+                    }
+                    else if (strstr((char*)dtmp, "LRC_CLR") != NULL) {
+                        extern void music_clear_lrc(void);
+                        music_clear_lrc();
+                    }
+                    else if (strncmp((char*)dtmp, "LRC:", 4) == 0) {
+                        int sec = atoi((char*)dtmp + 4);
+                        char *text_start = strchr((char*)dtmp + 4, ':');
+                        if (text_start != NULL) {
+                            text_start++;
+                            text_start[strcspn(text_start, "\r\n")] = '\0';
+                            extern void music_add_lrc_line(int sec, const char* text);
+                            music_add_lrc_line(sec, text_start);
+                        }
+                    }
+
                 }
             }
             else if (event.type == UART_FIFO_OVF || event.type == UART_BUFFER_FULL) {

@@ -11,10 +11,10 @@ static const char *TAG = "MUSIC_APP";
 #define CHUNK_SIZE 2048
 extern SemaphoreHandle_t speaker_mutex;
 
-// 播放器状态机
 typedef enum { MUSIC_STOPPED, MUSIC_PLAYING, MUSIC_PAUSED } music_state_t;
 volatile music_state_t music_state = MUSIC_STOPPED;
-volatile int seek_target_sec = -1; // -1表示不跳转，大于等于0表示要跳转的秒数
+volatile int seek_target_sec = -1;
+volatile int current_vol = 100;
 
 static void play_wav_task(void *pvParameters) {
     char *file_path = (char *)pvParameters;
@@ -28,48 +28,65 @@ static void play_wav_task(void *pvParameters) {
         return;
     }
 
-    // 计算音频总时长
     fseek(f, 0, SEEK_END);
     long file_size = ftell(f);
-    int total_sec = (file_size - 44) / 32000; // 16kHz 16bit mono = 32000 bytes/sec
+    int total_sec = (file_size - 44) / 32000;
     
-    // 告诉 UI 界面这首歌有多长
-    char cmd_buf[64];
-    snprintf(cmd_buf, sizeof(cmd_buf), "AUDIO_INFO:TOTAL:%d\r\n", total_sec);
+    char cmd_buf[32];
+    snprintf(cmd_buf, sizeof(cmd_buf), "AUDIO_INFO:TOT:%d", total_sec);
     my_uart_send(cmd_buf);
+    vTaskDelay(pdMS_TO_TICKS(50));
 
-    fseek(f, 44, SEEK_SET); // 回到音频数据区开头
+    fseek(f, 44, SEEK_SET);
     uint8_t *buffer = (uint8_t *)malloc(CHUNK_SIZE);
     
     music_state = MUSIC_PLAYING;
 
+    uint32_t samples_played = 0;
+    int last_sent_sec = -1;
+
     while (music_state != MUSIC_STOPPED) {
-        // 1. 处理暂停状态
         if (music_state == MUSIC_PAUSED) {
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
         }
 
-        // 2. 处理快进/快退 (Seek)
         if (seek_target_sec >= 0) {
+            samples_played = seek_target_sec * 16000;
             long target_offset = 44 + (seek_target_sec * 32000);
             if (target_offset > file_size) target_offset = file_size - CHUNK_SIZE;
             if (target_offset < 44) target_offset = 44;
             
             fseek(f, target_offset, SEEK_SET);
-            seek_target_sec = -1; // 执行完毕，重置标志
+            seek_target_sec = -1;
             ESP_LOGI(TAG, "⏩ 进度已跳转");
         }
 
-        // 3. 正常读取与播放
         size_t bytes_read = fread(buffer, 1, CHUNK_SIZE, f);
         if (bytes_read > 0) {
+            if (current_vol < 100) {
+                int16_t *pcm = (int16_t *)buffer;
+                for (int i = 0; i < bytes_read / 2; i++) {
+                    pcm[i] = (pcm[i] * current_vol) / 100;
+                }
+            }
+
             xSemaphoreTake(speaker_mutex, portMAX_DELAY);
             playSpeaker(buffer, bytes_read);
             xSemaphoreGive(speaker_mutex);
+
+            samples_played += bytes_read / 2;
+            int cur_sec = samples_played / 16000;
+            if (cur_sec != last_sent_sec) {
+                char time_cmd[32];
+                snprintf(time_cmd, sizeof(time_cmd), "AUDIO_INFO:CUR:%d", cur_sec);
+                my_uart_send(time_cmd);
+                last_sent_sec = cur_sec;
+            }
+
             vTaskDelay(pdMS_TO_TICKS(2));
         } else {
-            break; // 播完了
+            break;
         }
     }
     
@@ -80,10 +97,9 @@ static void play_wav_task(void *pvParameters) {
     vTaskDelete(NULL);
 }
 
-// ============ 对外接口 ============
 void start_music_player(const char *path) {
     if (music_state != MUSIC_STOPPED) music_state = MUSIC_STOPPED;
-    vTaskDelay(pdMS_TO_TICKS(100)); // 等待上一个任务销毁
+    vTaskDelay(pdMS_TO_TICKS(100));
     char *path_copy = strdup(path);
     xTaskCreatePinnedToCore(play_wav_task, "wav_player", 4096, (void *)path_copy, 4, NULL, 1);
 }
@@ -91,3 +107,4 @@ void pause_music_player(void) { if (music_state == MUSIC_PLAYING) music_state = 
 void resume_music_player(void) { if (music_state == MUSIC_PAUSED) music_state = MUSIC_PLAYING; }
 void stop_music_player(void) { music_state = MUSIC_STOPPED; }
 void seek_music_player(int sec) { seek_target_sec = sec; }
+void set_music_volume(int vol) { current_vol = vol; }

@@ -5,16 +5,12 @@
 extern "C" {
 #endif
 
-/**
- * @brief 启动音乐播放器 (后台任务)
- * @param path SD卡上WAV音频文件的绝对路径，如 "/sdcard/music.wav"
- */
 void start_music_player(const char *path);
-
-/**
- * @brief 停止音乐播放 (中途刹车)
- */
 void stop_music_player(void);
+void pause_music_player(void);
+void resume_music_player(void);
+void seek_music_player(int sec);
+void set_music_volume(int vol);
 
 #ifdef __cplusplus
 }

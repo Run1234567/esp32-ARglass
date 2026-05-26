@@ -23,6 +23,8 @@ typedef enum {
     SCREEN_PLAYLIST, // ✨ 新增：播放列表界面
     SCREEN_CAMERA,  // ✨ 新增：相机界面
     SCREEN_NOISE,   // noise meter
+    SCREEN_PITCH,   // pitch detector
+    SCREEN_MUSIC,   // music player
     SCREEN_AI_CHAT  // AI 对话 (预留给你未来的功能)
 } ui_screen_state_t;
 
