@@ -52,6 +52,10 @@ void switch_to_screen(ui_screen_state_t target_screen) {
         my_uart_send("CMD:GET_MUSIC_LIST\r\n");
     }
 
+    if (target_screen == SCREEN_NOVEL) {
+        my_uart_send("CMD:GET_BOOKS\r\n");
+    }
+
     if (current_screen == SCREEN_NOISE && target_screen != SCREEN_NOISE) {
         my_uart_send("CMD:NOISE_OFF\r\n");
     }

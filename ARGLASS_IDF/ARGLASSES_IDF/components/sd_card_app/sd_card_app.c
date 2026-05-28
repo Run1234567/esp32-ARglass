@@ -107,10 +107,13 @@ void clean_text_for_tts(char *str) {
 // 💡 读取块大小设定为 128 字节 
 // ========================================== 
 #define READ_CHUNK_SIZE 128 
-#define NOVEL_FILE_PATH MOUNT_POINT"/novel.txt" 
+
 
 // ✨ 全局书签：记录在 SD 卡文件中的绝对字节位置 
-static uint32_t current_file_offset = 0 ; 
+uint32_t current_file_offset = 0 ; 
+
+// ✨ 全局变量：保存当前正在阅读的小说绝对路径 
+char current_novel_path[128] = ""; 
 
 // ✨ 新增全局开关：记录当前是否允许语音播报 (1=开启, 0=关闭) 
 uint8_t global_tts_enabled = 1; 
@@ -119,9 +122,14 @@ uint8_t global_tts_enabled = 1;
 // 📖 纯净版：从 SD 卡读取、TTS播报、并通过串口发给 UI 
 // ========================================== 
 void test_read_novel_next_chunk(void) { 
-    FILE *f = fopen(NOVEL_FILE_PATH, "r" ); 
+    if (strlen(current_novel_path) == 0) { 
+        ESP_LOGE("SD_READ", "❌ 未指定阅读路径"); 
+        return; 
+    } 
+
+    FILE *f = fopen(current_novel_path, "r" ); 
     if (f == NULL ) { 
-        ESP_LOGE("SD_READ", "❌ 找不到文件: %s" , NOVEL_FILE_PATH); 
+        ESP_LOGE("SD_READ", "❌ 找不到章节文件: %s" , current_novel_path); 
         return ; 
     } 
 
@@ -183,7 +191,7 @@ void test_read_novel_next_chunk(void) {
 }
 
 // ==========================================
-//   扫描 YY 文件夹并发送音乐列表给 UI
+//   扫描音乐文件夹并发送列表给 UI
 // ==========================================
 void scan_and_send_music_list(void) {
     char dir_path[64];
@@ -259,4 +267,121 @@ void send_lrc_to_ui(const char* song_name) {
     }
     fclose(f);
     ESP_LOGI(TAG, "✅ 歌词推送完成！");
+}
+
+// 💡 定义每页最多显示几条，可根据你的屏幕大小随意修改
+#define PAGE_LIMIT 6
+
+// ==========================================
+// 📂 扫描 1：发送小说书名（分页版）
+// ==========================================
+void scan_and_send_book_list(int offset) {
+    char dir_path[64];
+    snprintf(dir_path, sizeof(dir_path), "%s/小说", MOUNT_POINT);
+
+    DIR *dir = opendir(dir_path);
+    if (!dir) {
+        ESP_LOGE("SD_APP", "❌ 无法打开 小说 文件夹");
+        return;
+    }
+
+    my_uart_send("BK_CLR\r\n");
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    // 如果不是第一页，发送一个"上一页"的指令给 UI
+    if (offset > 0) {
+        my_uart_send("BK_PAGE:PREV\r\n");
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+
+    struct dirent *ent;
+    int current_idx = 0;
+    int sent_count = 0;
+    bool has_more = false;
+
+    while ((ent = readdir(dir)) != NULL) {
+        if (ent->d_type == DT_DIR) {
+
+            if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
+                continue;
+            }
+
+            if (current_idx >= offset) {
+                if (sent_count < PAGE_LIMIT) {
+                    char cmd[300];
+                    snprintf(cmd, sizeof(cmd), "BK:%s\r\n", ent->d_name);
+                    my_uart_send(cmd);
+                    vTaskDelay(pdMS_TO_TICKS(20));
+                    sent_count++;
+                } else {
+                    has_more = true;
+                    break;
+                }
+            }
+            current_idx++;
+        }
+    }
+    closedir(dir);
+
+    if (has_more) {
+        my_uart_send("BK_PAGE:NEXT\r\n");
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+
+    my_uart_send("BK_END\r\n");
+    ESP_LOGI("SD_APP", "📚 书库列表 (偏移量:%d) 发送完毕", offset);
+}
+
+// ==========================================
+// 📂 扫描 2：发送章节列表（分页版）
+// ==========================================
+void scan_and_send_chapter_list(const char* book_name, int offset) {
+    char dir_path[128];
+    snprintf(dir_path, sizeof(dir_path), "%s/小说/%s", MOUNT_POINT, book_name);
+
+    DIR *dir = opendir(dir_path);
+    if (!dir) {
+        ESP_LOGE("SD_APP", "❌ 无法打开书籍文件夹: %s", dir_path);
+        return;
+    }
+
+    my_uart_send("CH_CLR\r\n");
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    if (offset > 0) {
+        my_uart_send("CH_PAGE:PREV\r\n");
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+
+    struct dirent *ent;
+    int current_idx = 0;
+    int sent_count = 0;
+    bool has_more = false;
+
+    while ((ent = readdir(dir)) != NULL) {
+        if (strstr(ent->d_name, ".txt") || strstr(ent->d_name, ".TXT")) {
+            if (current_idx >= offset) {
+                if (sent_count < PAGE_LIMIT) {
+                    char cmd[300];
+                    snprintf(cmd, sizeof(cmd), "CH:%s\r\n", ent->d_name);
+                    my_uart_send(cmd);
+                    vTaskDelay(pdMS_TO_TICKS(20));
+                    sent_count++;
+                } else {
+                    has_more = true;
+                    break;
+                }
+            }
+            current_idx++;
+        }
+    }
+    closedir(dir);
+
+    if (has_more) {
+        my_uart_send("CH_PAGE:NEXT\r\n");
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+
+    my_uart_send("CH_END\r\n");
+    ESP_LOGI("SD_APP", "📑 章节列表 (偏移量:%d) 发送完毕", offset);
 }

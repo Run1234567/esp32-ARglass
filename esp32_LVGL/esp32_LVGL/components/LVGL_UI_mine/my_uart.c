@@ -9,6 +9,7 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_lvgl_port.h"
 #include "ui_globals.h"
 
 #define UART_PORT_NUM      UART_NUM_1
@@ -38,16 +39,57 @@ static void uart_event_task(void *pvParameters) {
 
                     if (strncmp((char*)dtmp, "NOV:", 4) == 0) {
                         char *payload = (char*)dtmp + 4;
-                        if (novel_source_buffer != NULL) {
-                            free(novel_source_buffer);
-                            novel_source_buffer = NULL;
+                        if (lvgl_port_lock(0)) {
+                            if (novel_source_buffer != NULL) {
+                                free(novel_source_buffer);
+                                novel_source_buffer = NULL;
+                            }
+                            novel_source_buffer = (char*) malloc(strlen(payload) + 1);
+                            if (novel_source_buffer != NULL) {
+                                strcpy(novel_source_buffer, payload);
+                                current_book_pos = 0;
+                                novel_scroll_task_running = 0;
+                            }
+                            lvgl_port_unlock();
                         }
-                        novel_source_buffer = (char*) malloc(strlen(payload) + 1);
-                        if (novel_source_buffer != NULL) {
-                            strcpy(novel_source_buffer, payload);
-                            current_book_pos = 0;
-                            novel_scroll_task_running = 0;
-                        }
+                    }
+                    // -- 书单相关 --
+                    else if (strstr((char*)dtmp, "BK_CLR") != NULL) {
+                        extern void novel_ui_clear_book_list(void);
+                        novel_ui_clear_book_list();
+                    }
+                    else if (strstr((char*)dtmp, "BK_PAGE:PREV") != NULL) {
+                        extern void novel_ui_add_book_page_btn(int is_next);
+                        novel_ui_add_book_page_btn(0);
+                    }
+                    else if (strstr((char*)dtmp, "BK_PAGE:NEXT") != NULL) {
+                        extern void novel_ui_add_book_page_btn(int is_next);
+                        novel_ui_add_book_page_btn(1);
+                    }
+                    else if (strncmp((char*)dtmp, "BK:", 3) == 0) {
+                        char *book_name = (char*)dtmp + 3;
+                        book_name[strcspn(book_name, "\r\n")] = '\0';
+                        extern void novel_ui_add_book(const char* name);
+                        novel_ui_add_book(book_name);
+                    }
+                    // -- 章节相关 --
+                    else if (strstr((char*)dtmp, "CH_CLR") != NULL) {
+                        extern void novel_ui_clear_chap_list(void);
+                        novel_ui_clear_chap_list();
+                    }
+                    else if (strstr((char*)dtmp, "CH_PAGE:PREV") != NULL) {
+                        extern void novel_ui_add_chap_page_btn(int is_next);
+                        novel_ui_add_chap_page_btn(0);
+                    }
+                    else if (strstr((char*)dtmp, "CH_PAGE:NEXT") != NULL) {
+                        extern void novel_ui_add_chap_page_btn(int is_next);
+                        novel_ui_add_chap_page_btn(1);
+                    }
+                    else if (strncmp((char*)dtmp, "CH:", 3) == 0) {
+                        char *chap_name = (char*)dtmp + 3;
+                        chap_name[strcspn(chap_name, "\r\n")] = '\0';
+                        extern void novel_ui_add_chap(const char* name);
+                        novel_ui_add_chap(chap_name);
                     }
                     else if (strncmp((char*)dtmp, "CMD:CLEAR_LIST", 14) == 0) { extern void playlist_clear(void); playlist_clear(); }
                     else if (strncmp((char*)dtmp, "REC_FILE:", 9) == 0) { extern void playlist_add_file(const char* filename); playlist_add_file((char*)dtmp + 9); }

@@ -61,21 +61,16 @@ static void uart_event_task(void *pvParameters)
                     } 
 
                     // ==========================================
-                    // 📚 小说三级菜单协议 (已提升宽容度)
+                    // 📚 小说三级菜单协议
                     // ==========================================
-                    else if (strncmp((char*)dtmp, "CMD:GET_BOOKS", 13) == 0) {
-                        int offset = 0;
-                        char *colon = strchr((char*)dtmp, ':');
-                        if (colon) {
-                            offset = atoi(colon + 1);
-                        }
+                    else if (strncmp((char*)dtmp, "CMD:GET_BOOKS:", 14) == 0) {
+                        int offset = atoi((char*)dtmp + 14);
                         ESP_LOGI(TAG, "📚 收到 UI 指令：请求书库列表 (偏移:%d)", offset);
                         scan_and_send_book_list(offset);
                     }
                     else if (strncmp((char*)dtmp, "CMD:GET_CHAPS:", 14) == 0) {
                         char *param = (char*)dtmp + 14;
                         param[strcspn(param, "\r\n")] = '\0';
-
                         char *comma = strchr(param, ',');
                         int offset = 0;
                         if (comma) {
