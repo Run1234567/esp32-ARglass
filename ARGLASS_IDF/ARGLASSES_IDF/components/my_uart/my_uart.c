@@ -125,7 +125,7 @@ static void uart_event_task(void *pvParameters)
                         extern void stop_music_player(void); stop_music_player();
                     }
                     else if (strstr((char*)dtmp, "CMD:GET_MUSIC_LIST") != NULL) {
-                        ESP_LOGI(TAG, "   收到 UI 指令：请求扫描 YY 文件夹歌单");
+                        ESP_LOGI(TAG, "📋 收到 UI 指令：请求扫描音乐文件夹歌单");
                         extern void scan_and_send_music_list(void);
                         scan_and_send_music_list();
                     }
@@ -138,7 +138,7 @@ static void uart_event_task(void *pvParameters)
                             }
                         }
                         char full_path[128];
-                        snprintf(full_path, sizeof(full_path), "%s/YY/%s", MOUNT_POINT, filename);
+                        snprintf(full_path, sizeof(full_path), "%s/音乐/%s", MOUNT_POINT, filename);
 
                         ESP_LOGI(TAG, "▶️ 准备播放音乐: %s", full_path);
                         

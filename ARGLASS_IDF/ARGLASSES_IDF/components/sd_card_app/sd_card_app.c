@@ -187,7 +187,7 @@ void test_read_novel_next_chunk(void) {
 // ==========================================
 void scan_and_send_music_list(void) {
     char dir_path[64];
-    snprintf(dir_path, sizeof(dir_path), "%s/YY", MOUNT_POINT);
+    snprintf(dir_path, sizeof(dir_path), "%s/音乐", MOUNT_POINT);
 
     DIR *dir = opendir(dir_path);
     if (dir == NULL) {
@@ -219,7 +219,7 @@ void scan_and_send_music_list(void) {
 // ==========================================
 void send_lrc_to_ui(const char* song_name) {
     char lrc_path[128];
-    snprintf(lrc_path, sizeof(lrc_path), "%s/YY/%s", MOUNT_POINT, song_name);
+    snprintf(lrc_path, sizeof(lrc_path), "%s/音乐/%s", MOUNT_POINT, song_name);
     
     char *ext = strrchr(lrc_path, '.');
     if (ext != NULL) {

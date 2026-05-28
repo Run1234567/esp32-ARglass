@@ -60,17 +60,16 @@ static void write_wav_header(FILE* f, uint32_t sample_rate, uint16_t bits_per_sa
 // 🔍 内部函数：自动获取下一个不冲突的文件名 (保存至 ly 文件夹)
 // ==========================================
 static void get_next_filename(char *out_filepath, size_t max_len) {
-    // ✨ 核心保护：自动创建 ly 文件夹（如果已存在则会被自动忽略）
+    // 自动创建录音文件夹（如果已存在则会被忽略）
     char dir_path[64];
-    snprintf(dir_path, sizeof(dir_path), "%s/ly", MOUNT_POINT);
-    mkdir(dir_path, 0777); 
+    snprintf(dir_path, sizeof(dir_path), "%s/录音", MOUNT_POINT);
+    mkdir(dir_path, 0777);
 
     struct stat st;
     int file_index = 1;
     
     while (file_index <= 9999) { 
-        // ✨ 修改路径，加入 /ly/
-        snprintf(out_filepath, max_len, "%s/ly/REC_%03d.wav", MOUNT_POINT, file_index);
+        snprintf(out_filepath, max_len, "%s/录音/REC_%03d.wav", MOUNT_POINT, file_index);
         if (stat(out_filepath, &st) != 0) {
             break; 
         }
@@ -159,19 +158,18 @@ void stop_record(void) {
 // 🔍 内部函数：自动获取下一个不冲突的照片名 (保存至 ly 文件夹)
 // ==========================================
 static void get_next_img_filename(char *out_filepath, size_t max_len) {
-    // ✨ 核心保护：自动创建 ly 文件夹
+    // 自动创建拍照文件夹
     char dir_path[64];
-    snprintf(dir_path, sizeof(dir_path), "%s/ly", MOUNT_POINT);
+    snprintf(dir_path, sizeof(dir_path), "%s/拍照", MOUNT_POINT);
     mkdir(dir_path, 0777);
 
     struct stat st;
     int file_index = 1;
     
     while (file_index <= 9999) { 
-        // ✨ 修改路径，加入 /ly/
-        snprintf(out_filepath, max_len, "%s/ly/IMG_%03d.jpg", MOUNT_POINT, file_index);
+        snprintf(out_filepath, max_len, "%s/拍照/IMG_%03d.jpg", MOUNT_POINT, file_index);
         if (stat(out_filepath, &st) != 0) {
-            break; // 找到空闲名字
+            break;
         }
         file_index++;
     }
@@ -219,20 +217,19 @@ esp_err_t take_photo_and_save(void) {
 // ========================================== 
 void scan_and_send_record_list(void) { 
     char dir_path[64]; 
-    snprintf(dir_path, sizeof(dir_path), "%s/ly", MOUNT_POINT); 
+    snprintf(dir_path, sizeof(dir_path), "%s/录音", MOUNT_POINT); 
 
     DIR *dir = opendir(dir_path); 
     if (!dir) { 
-        ESP_LOGE("RECORD_APP", "❌ 无法打开 ly 文件夹"); 
+        ESP_LOGE("RECORD_APP", "❌ 无法打开录音文件夹"); 
         my_uart_send("CMD:CLEAR_LIST\r\n"); 
-        vTaskDelay(pdMS_TO_TICKS(20)); // ✨ 新增延时
+        vTaskDelay(pdMS_TO_TICKS(20));
         my_uart_send("CMD:LIST_END\r\n"); 
         return; 
     } 
 
-    // 1. 告诉 UI 准备接收新列表 
     my_uart_send("CMD:CLEAR_LIST\r\n"); 
-    vTaskDelay(pdMS_TO_TICKS(20)); // ✨ 新增延时，防止和后面的文件粘包
+    vTaskDelay(pdMS_TO_TICKS(20));
 
     struct dirent *entry; 
     char uart_buf[512]; 
