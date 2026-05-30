@@ -19,10 +19,16 @@ static lv_obj_t * panel_settings = NULL;
 static lv_obj_t * label_settings = NULL;
 
 static uint8_t is_in_settings = 0;
-static uint8_t auto_mode = 0;
-static int8_t auto_sec = 3;
-static uint8_t tts_enabled = 1;
 static uint8_t setting_focus = 0;
+
+// ✨ 核心设计：三大阅读模式
+uint8_t novel_read_mode = 0; // 0=手动翻页, 1=自动翻页, 2=语音同步
+
+// ✨ 核心设计：档位配置表
+static const int speed_options_ms[] = {100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 2000, 3000};
+static const int num_speeds = sizeof(speed_options_ms) / sizeof(speed_options_ms[0]);
+static int auto_speed_idx = 9; // 默认挂在 1000ms (1秒)
+static int tts_speed_val = 4;  // 默认语速 4 (0-9)
 
 static char display_lines[SCREEN_ROWS][ROW_WIDTH];
 static char full_display_str[SCREEN_ROWS * ROW_WIDTH];
@@ -149,11 +155,28 @@ static void chap_next_cb(lv_event_t * e) {
 // 核心函数：从书库取一行，并滚动显示
 // ==========================================
 void novel_scroll_one_line(void) {
-    if (novel_source_buffer == NULL || novel_source_buffer[current_book_pos] == '\0') {
-        novel_scroll_task_running = 1;
-        my_uart_send("CMD:NOVEL_END\r\n");
+    if (novel_source_buffer == NULL) {
+        if (!novel_scroll_task_running && novel_read_mode != 2) {
+            novel_scroll_task_running = 1;
+            my_uart_send("CMD:NOVEL_END\r\n");
+        }
         return;
     }
+
+    int remaining = strlen(&novel_source_buffer[current_book_pos]);
+    char *newline_ptr = strchr(&novel_source_buffer[current_book_pos], '\n');
+
+    // ✨ 半截行拦截逻辑：如果是语音同步模式 (2)，哪怕只有半截字也必须立刻显示！
+    if (remaining < ROW_WIDTH - 1 && newline_ptr == NULL) {
+        if (novel_read_mode != 2) {
+            if (!novel_scroll_task_running) {
+                novel_scroll_task_running = 1;
+                my_uart_send("CMD:NOVEL_END\r\n");
+            }
+            return;
+        }
+    }
+    if (novel_source_buffer[current_book_pos] == '\0') return;
 
     for (int i = 0; i < SCREEN_ROWS - 1; i++) {
         strncpy(display_lines[i], display_lines[i + 1], ROW_WIDTH - 1);
@@ -164,15 +187,8 @@ void novel_scroll_one_line(void) {
     int line_len = 0;
 
     while (novel_source_buffer[current_book_pos] != '\0') {
-        if (novel_source_buffer[current_book_pos] == '\r') {
-            current_book_pos++;
-            continue;
-        }
-
-        if (novel_source_buffer[current_book_pos] == '\n') {
-            current_book_pos++;
-            break;
-        }
+        if (novel_source_buffer[current_book_pos] == '\r') { current_book_pos++; continue; }
+        if (novel_source_buffer[current_book_pos] == '\n') { current_book_pos++; break; }
 
         int char_bytes = 1;
         unsigned char c = (unsigned char)novel_source_buffer[current_book_pos];
@@ -181,9 +197,7 @@ void novel_scroll_one_line(void) {
         else if (c < 0xF0) char_bytes = 3;
         else char_bytes = 4;
 
-        if (line_len + char_bytes >= ROW_WIDTH - 1) {
-            break;
-        }
+        if (line_len + char_bytes >= ROW_WIDTH - 1) break;
 
         for (int j = 0; j < char_bytes; j++) {
             next_line[line_len++] = novel_source_buffer[current_book_pos++];
@@ -191,7 +205,6 @@ void novel_scroll_one_line(void) {
     }
 
     next_line[line_len] = '\0';
-
     strncpy(display_lines[SCREEN_ROWS - 1], next_line, ROW_WIDTH - 1);
     display_lines[SCREEN_ROWS - 1][ROW_WIDTH - 1] = '\0';
 
@@ -207,11 +220,19 @@ void novel_scroll_one_line(void) {
     }
 }
 
+// ✨ 为语音模式准备的"一拉到底"函数
+void novel_scroll_all_buffer(void) {
+    while(novel_source_buffer != NULL && novel_source_buffer[current_book_pos] != '\0') {
+        novel_scroll_one_line();
+    }
+}
+
 // ==========================================
 // 自动翻页定时器回调
 // ==========================================
 static void auto_scroll_timer_cb(lv_timer_t * timer) {
-    if (!is_in_settings && auto_mode == 1 && ui_state == NOVEL_STATE_READING) {
+    // 只有在模式 1 (自动模式) 下，定时器才干活
+    if (!is_in_settings && novel_read_mode == 1 && ui_state == NOVEL_STATE_READING) {
         novel_scroll_one_line();
     }
 }
@@ -221,20 +242,27 @@ static void auto_scroll_timer_cb(lv_timer_t * timer) {
 // ==========================================
 static void update_novel_settings_display(void) {
     char buf[256];
-    char auto_str[32];
-    char tts_str[32];
+    char mode_str[32];
+    char speed_str[32];
 
-    if (auto_mode == 0) strcpy(auto_str, "手动翻页");
-    else sprintf(auto_str, "自动: %d秒/行", auto_sec);
-
-    strcpy(tts_str, tts_enabled ? "开启" : "关闭");
-
-    if (setting_focus == 0) {
-        sprintf(buf, "⚙️ 阅读设置\n\n#FFFF00 > 翻页: %s <#\n  语音: %s  \n\n上下调节 右滑切换", auto_str, tts_str);
+    if (novel_read_mode == 0) {
+        strcpy(mode_str, "手动无声");
+        strcpy(speed_str, "---");
+    } else if (novel_read_mode == 1) {
+        strcpy(mode_str, "自动翻页");
+        int ms = speed_options_ms[auto_speed_idx];
+        if (ms < 1000) sprintf(speed_str, "0.%d秒/行", ms / 100);
+        else sprintf(speed_str, "%d秒/行", ms / 1000);
     } else {
-        sprintf(buf, "⚙️ 阅读设置\n\n  翻页: %s  \n#FFFF00 > 语音: %s <#\n\n上下调节 右滑切换", auto_str, tts_str);
+        strcpy(mode_str, "语音同步");
+        sprintf(speed_str, "语速: %d", tts_speed_val);
     }
 
+    if (setting_focus == 0) {
+        sprintf(buf, "⚙️ 阅读设置\n\n#FFFF00 > 模式: %s <#\n  速度: %s  \n\n上下调节 右滑切换", mode_str, speed_str);
+    } else {
+        sprintf(buf, "⚙️ 阅读设置\n\n  模式: %s  \n#FFFF00 > 速度: %s <#\n\n上下调节 右滑切换", mode_str, speed_str);
+    }
     lv_label_set_text(label_settings, buf);
 }
 
@@ -365,6 +393,20 @@ static void chap_list_btn_cb(lv_event_t * e) {
 
     lv_label_set_text(label_novel_text, "加载中...");
 
+    // ✨ 修复 1：进新章节前，彻底清空上一章的残余文字，防止两章内容粘连！
+    if (lvgl_port_lock(0)) {
+        if (novel_source_buffer != NULL) {
+            free(novel_source_buffer);
+            novel_source_buffer = NULL;
+        }
+        current_book_pos = 0;
+        lvgl_port_unlock();
+    }
+
+    // ✨ 修复 2：每次进小说，强行将 UI 和主板重置为"手动无声"模式 (0)
+    novel_read_mode = 0;
+    my_uart_send("CMD:MODE:TEXT\r\n");
+
     char cmd[256];
     snprintf(cmd, sizeof(cmd), "CMD:READ_CHAP:%s/%s\r\n", current_selected_book, chap_name);
     my_uart_send(cmd);
@@ -418,44 +460,68 @@ void novel_screen_handle_cmd(ui_cmd_t cmd) {
         case NOVEL_STATE_READING:
             if (is_in_settings == 0) {
                 if (cmd == UI_CMD_DOWN) {
-                    novel_scroll_one_line();
+                    // ✨ 语音模式下，屏蔽手动下滑翻页！
+                    if (novel_read_mode != 2) {
+                        novel_scroll_one_line();
+                    }
                 }
                 else if (cmd == UI_CMD_LEFT) {
                     switch_novel_view(NOVEL_STATE_CHAP_LIST);
+                    // ✨ 退出阅读时，发信号叫停主板的 TTS
+                    my_uart_send("CMD:STOP_READING\r\n");
                 }
                 else if (cmd == UI_CMD_RIGHT) {
                     is_in_settings = 1;
                     setting_focus = 0;
                     lv_obj_clear_flag(panel_settings, LV_OBJ_FLAG_HIDDEN);
                     update_novel_settings_display();
-                    if (auto_mode == 1) lv_timer_pause(auto_scroll_timer);
+                    lv_timer_pause(auto_scroll_timer);
                 }
             }
             else {
                 if (cmd == UI_CMD_RIGHT) {
-                    setting_focus = (setting_focus + 1) % 2;
+                    // 如果是手动模式，速度项不可选
+                    if (novel_read_mode != 0) {
+                        setting_focus = (setting_focus + 1) % 2;
+                    }
                     update_novel_settings_display();
                 }
                 else if (cmd == UI_CMD_UP || cmd == UI_CMD_DOWN) {
                     int offset = (cmd == UI_CMD_UP) ? 1 : -1;
 
                     if (setting_focus == 0) {
-                        if (auto_mode == 0) auto_mode = 1;
-                        else {
-                            auto_sec += offset;
-                            if (auto_sec > 15) auto_sec = 15;
-                            if (auto_sec < 1) { auto_sec = 1; auto_mode = 0; }
+                        int temp_mode = novel_read_mode + offset;
+                        if (temp_mode > 2) temp_mode = 2;
+                        if (temp_mode < 0) temp_mode = 0;
+                        
+                        // ✨ 修复 3：如果在设置里切换了模式，必须踢主板一脚！
+                        if (novel_read_mode != temp_mode) {
+                            novel_read_mode = temp_mode;
+                            if (novel_read_mode == 2) {
+                                my_uart_send("CMD:MODE:TTS\r\n");
+                                // 🌟 从无声切到语音，TTS碗里没字，立刻发个催更信号让它去读第一句！
+                                my_uart_send("CMD:NOVEL_END\r\n");
+                            }
+                            else {
+                                my_uart_send("CMD:MODE:TEXT\r\n");
+                                // 🌟 从语音切回无声，也发个信号让屏幕马上有字显示
+                                my_uart_send("CMD:NOVEL_END\r\n");
+                            }
                         }
                     }
                     else if (setting_focus == 1) {
-                        uint8_t old_tts = tts_enabled;
-                        tts_enabled = !tts_enabled;
-                        if (old_tts != tts_enabled) {
-                            if (tts_enabled) {
-                                my_uart_send("CMD:TTS_ON\r\n");
-                            } else {
-                                my_uart_send("CMD:TTS_OFF\r\n");
-                            }
+                        if (novel_read_mode == 1) {
+                            auto_speed_idx += offset;
+                            if (auto_speed_idx >= num_speeds) auto_speed_idx = num_speeds - 1;
+                            if (auto_speed_idx < 0) auto_speed_idx = 0;
+                        } else if (novel_read_mode == 2) {
+                            tts_speed_val += offset;
+                            if (tts_speed_val > 9) tts_speed_val = 9;
+                            if (tts_speed_val < 0) tts_speed_val = 0;
+                            // 语速变成立刻通知主板
+                            char cmd_buf[32];
+                            sprintf(cmd_buf, "CMD:TTS_SPEED:%d\r\n", tts_speed_val);
+                            my_uart_send(cmd_buf);
                         }
                     }
                     update_novel_settings_display();
@@ -463,8 +529,9 @@ void novel_screen_handle_cmd(ui_cmd_t cmd) {
                 else if (cmd == UI_CMD_LEFT) {
                     is_in_settings = 0;
                     lv_obj_add_flag(panel_settings, LV_OBJ_FLAG_HIDDEN);
-                    if (auto_mode == 1) {
-                        lv_timer_set_period(auto_scroll_timer, auto_sec * 1000);
+                    // 如果是自动模式，恢复并应用新速度
+                    if (novel_read_mode == 1) {
+                        lv_timer_set_period(auto_scroll_timer, speed_options_ms[auto_speed_idx]);
                         lv_timer_resume(auto_scroll_timer);
                     }
                 }

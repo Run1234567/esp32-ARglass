@@ -40,15 +40,32 @@ static void uart_event_task(void *pvParameters) {
                     if (strncmp((char*)dtmp, "NOV:", 4) == 0) {
                         char *payload = (char*)dtmp + 4;
                         if (lvgl_port_lock(0)) {
-                            if (novel_source_buffer != NULL) {
-                                free(novel_source_buffer);
-                                novel_source_buffer = NULL;
+                            int leftover_len = 0;
+                            if (novel_source_buffer != NULL && current_book_pos < strlen(novel_source_buffer)) {
+                                leftover_len = strlen(novel_source_buffer + current_book_pos);
                             }
-                            novel_source_buffer = (char*) malloc(strlen(payload) + 1);
-                            if (novel_source_buffer != NULL) {
-                                strcpy(novel_source_buffer, payload);
+                            
+                            char *new_buf = (char*) malloc(leftover_len + strlen(payload) + 1);
+                            if (new_buf != NULL) {
+                                new_buf[0] = '\0';
+                                if (leftover_len > 0) {
+                                    strcpy(new_buf, novel_source_buffer + current_book_pos);
+                                }
+                                strcat(new_buf, payload);
+                                
+                                if (novel_source_buffer != NULL) {
+                                    free(novel_source_buffer);
+                                }
+                                novel_source_buffer = new_buf;
                                 current_book_pos = 0;
                                 novel_scroll_task_running = 0;
+                                
+                                // ✨ 新增：如果是语音同步模式，收到文字立刻刷出来！
+                                extern uint8_t novel_read_mode;
+                                if (novel_read_mode == 2) {
+                                    extern void novel_scroll_all_buffer(void);
+                                    novel_scroll_all_buffer();
+                                }
                             }
                             lvgl_port_unlock();
                         }

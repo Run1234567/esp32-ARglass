@@ -6,47 +6,62 @@
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/queue.h" // ✨ 引入队列
+#include "freertos/queue.h"
+#include "my_uart.h" 
 #include <string.h>
-#include <ctype.h>  // 为了使用 ispunct 和 isspace
+#include <ctype.h>
+
+static const char *TAG = "TTS_APP";
+#define MOUNT_POINT "/sdcard"
 
 // ==========================================
-// 🧠 内部辅助函数：判断并跳过中文标点 (UTF-8)
+// ⚙️ 全局控制变量
+// ==========================================
+volatile int global_tts_speed = 4;        // 默认语速
+volatile bool is_reading_active = false;  // 是否处于连续读小说模式
+volatile bool force_stop_tts = false;     // 强行打断说话标志
+
+static esp_tts_handle_t *tts_handle = NULL;
+static uint8_t *model_data_in_psram = NULL;
+static QueueHandle_t tts_queue = NULL;
+
+// ==========================================
+// 🧠 内部辅助函数：判断并跳过中文标点
 // ==========================================
 static int skip_zh_punctuation(const char *str) {
-    // 常见中文标点大全 (UTF-8编码，通常每个占3字节)
     const char *zh_puncs[] = {
         "，", "。", "！", "？", "：", "；", "、",
         "“", "”", "‘", "’", "（", "）",
         "【", "】", "《", "》", "…", "—", "～", NULL
     };
-    
     for (int i = 0; zh_puncs[i] != NULL; i++) {
         int len = strlen(zh_puncs[i]);
-        if (strncmp(str, zh_puncs[i], len) == 0) {
-            return len; // 命中！返回这个标点占用的字节数
-        }
+        if (strncmp(str, zh_puncs[i], len) == 0) return len; 
     }
-    return 0; // 不是中文标点
+    return 0; 
 }
 
-#define MOUNT_POINT "/sdcard"
-static const char *TAG = "TTS_APP";
+// 设置语速
+void tts_set_speed(int speed) {
+    global_tts_speed = speed;
+}
 
-// --- 全局句柄 ---
-static esp_tts_handle_t *tts_handle = NULL;
-static uint8_t *model_data_in_psram = NULL;
+// 打断说话并清空队列
+void stop_tts_reading(void) {
+    is_reading_active = false;
+    force_stop_tts = true; 
+    char *temp;
+    // 把排队的句子全部扔进垃圾桶
+    while(xQueueReceive(tts_queue, &temp, 0) == pdTRUE) {
+        free(temp);
+    }
+}
 
-// ✨ 我们只需要一个简单的队列，存放需要朗读的字符串指针
-static QueueHandle_t tts_queue = NULL;
-
-// ==========================================
-// 1. 从 SD 卡加载模型 (保持你的原代码完全不变)
-// ==========================================
+// 加载模型
 esp_err_t load_tts_model_from_sd(const char* path) {
     FILE *f = fopen(path, "rb");
     if (f == NULL) {
-        ESP_LOGE(TAG, "❌ 无法打开 SD 卡上的模型文件: %s", path);
+        ESP_LOGE(TAG, "❌ 无法打开模型文件: %s", path);
         return ESP_FAIL;
     }
     fseek(f, 0, SEEK_END);
@@ -65,58 +80,70 @@ esp_err_t load_tts_model_from_sd(const char* path) {
 }
 
 // ==========================================
-// 2. 核心任务：边转边播 (单兵作战，绝不死锁)
+// 🎙️ 核心任务：边转边播 (已修复哑巴Bug)
 // ==========================================
 void tts_main_task(void *pvParameters) {
     char *current_text = NULL;
 
     while (1) {
-        // 1. 阻塞等待队列里的文字。如果没有字，任务在这里死等，绝对不占 CPU！
         if (xQueueReceive(tts_queue, &current_text, portMAX_DELAY) == pdTRUE) {
-            xSemaphoreTake(speaker_mutex, portMAX_DELAY); // 抢锁
+            xSemaphoreTake(speaker_mutex, portMAX_DELAY); 
+
+            force_stop_tts = false; // 每次拿到新句子，允许发声
+
+            // ✨ 如果是在读小说，把当前这句话发给屏幕显示
+            if (is_reading_active) {
+                char *uart_buf = malloc(strlen(current_text) + 10);
+                if (uart_buf) {
+                    sprintf(uart_buf, "NOV:%s", current_text);
+                    my_uart_send(uart_buf);
+                    free(uart_buf);
+                }
+            }
+
+            // ✨ 不管是不是小说模式，只要拿到字就必须开口！
             ESP_LOGI(TAG, "▶️ 开始合成并播放: %s", current_text);
 
             if (esp_tts_parse_chinese(tts_handle, current_text)) {
                 int len[1] = {0};
                 do {
-                    // 2. 生成一小段 PCM 音频
-                    short *pcm = esp_tts_stream_play(tts_handle, len, 4); 
-
+                    // 如果收到打断指令 (比如用户退出了小说界面)，立刻闭嘴退出循环
+                    if (force_stop_tts) break; 
+                    
+                    short *pcm = esp_tts_stream_play(tts_handle, len, global_tts_speed); 
                     if (pcm != NULL && len[0] > 0) {
-                        // 3. 直接推给底层喇叭。
-                        // 如果 I2S 正在忙，playSpeaker 会自动阻塞等待，把 CPU 让出去！
                         playSpeaker((uint8_t *)pcm, len[0] * 2);
                     }
-                    
-                    // 4. 强制喂狗，防止长句转换触发看门狗
                     vTaskDelay(pdMS_TO_TICKS(2)); 
-
                 } while (len[0] > 0);
                 
-                // 清理引擎状态
                 esp_tts_stream_reset(tts_handle);
             }
-            xSemaphoreGive(speaker_mutex);
-            // 5. 播完了，释放这块字符串内存
+            xSemaphoreGive(speaker_mutex); // 归还喇叭
+            
             free(current_text);
             current_text = NULL;
-            ESP_LOGI(TAG, "✅ 播放完毕");
+
+            // ✨ 如果在读小说模式下，这句读完了且队伍空了，立刻发信号去 SD 卡要新字
+            if (is_reading_active && !force_stop_tts && uxQueueMessagesWaiting(tts_queue) == 0) {
+                extern SemaphoreHandle_t next_page_sem;
+                if (next_page_sem != NULL) {
+                    xSemaphoreGive(next_page_sem);
+                }
+            }
         }
     }
 }
 
 // ==========================================
-// 3. 初始化引擎
+// 🚀 初始化引擎
 // ==========================================
 void init_tts_engine() {
-    // A. 创建消息队列（最多排队 10 句话）
     tts_queue = xQueueCreate(10, sizeof(char *));
 
-    // B. 加载模型
-    if (load_tts_model_from_sd(MOUNT_POINT "/TTS_MO~1.DAT") != ESP_OK) return;
+    // ✨ 这里用的是真名，确保和 SD 卡里放的文件一模一样！
+    if (load_tts_model_from_sd(MOUNT_POINT "/esp_tts_voice_data_xiaole.dat") != ESP_OK) return;
 
-    // C. 初始化乐鑫引擎
-    // C. 初始化乐鑫引擎
     esp_tts_voice_t *voice = esp_tts_voice_set_init(&esp_tts_voice_xiaole, (void *)model_data_in_psram);
     tts_handle = esp_tts_create(voice);
     
@@ -125,61 +152,74 @@ void init_tts_engine() {
     } else {
         ESP_LOGI(TAG, "🚀 TTS 系统初始化成功");
         
-        // D. 自动创建工作任务，扔到 Core 0，不跟你的网络/录音任务抢资源
-        xTaskCreatePinnedToCore(tts_main_task, "tts_task", 8192, NULL, 5, NULL, 0);
+        // ✨ 暴增到 32KB 内存，它这辈子都不会再爆栈了！
+        xTaskCreatePinnedToCore(tts_main_task, "tts_task", 32768, NULL, 5, NULL, 0);
     }
 }
+
 // ==========================================
-// 🔊 4. 对外发声接口 (带自动标点净化)
+// 📢 发声接口 (自带净化和切句，防过载)
 // ==========================================
 void tts_speak(const char *text) {
     if (text == NULL || tts_queue == NULL) return;
     
-    // 1. 动态分配内存（去标点后只会更短，所以按原长度分配绝对够用）
-    char *text_copy = (char *)malloc(strlen(text) + 1);
-    if (text_copy == NULL) {
-        ESP_LOGE(TAG, "❌ TTS 内存分配失败");
-        return;
-    }
+    const int MAX_CHUNK_BYTES = 90; 
+    char chunk_buf[MAX_CHUNK_BYTES + 4]; 
+    int chunk_len = 0;
 
-    char *dst = text_copy;
     const char *src = text;
 
-    // 2. 遍历原文本，无情击杀所有标点
     while (*src) {
-        // 🎯 拦截 A：处理 ASCII 标点、控制符和多余空格 (如 , . ! ? \n \r)
-        if (*src > 0 && *src < 127) {
-            if (ispunct((unsigned char)*src) || iscntrl((unsigned char)*src) || isspace((unsigned char)*src)) {
-                src++; // 遇到英文标点或空格，直接跳过
-                continue;
+        int char_bytes = 1;
+        unsigned char c = (unsigned char)*src;
+        if (c < 0x80) char_bytes = 1;
+        else if (c < 0xE0) char_bytes = 2;
+        else if (c < 0xF0) char_bytes = 3;
+        else char_bytes = 4;
+
+        int is_punc = 0;
+        int zh_punc_len = 0;
+
+        if (char_bytes == 1 && (ispunct(c) || iscntrl(c) || isspace(c))) {
+            is_punc = 1;
+        } else if (char_bytes >= 3) {
+            zh_punc_len = skip_zh_punctuation(src);
+            if (zh_punc_len > 0) is_punc = 1;
+        }
+
+        if (is_punc) {
+            if (chunk_len > 0) {
+                chunk_buf[chunk_len] = '\0';
+                char *text_copy = strdup(chunk_buf);
+                if (text_copy) {
+                    if (xQueueSend(tts_queue, &text_copy, portMAX_DELAY) != pdTRUE) free(text_copy);
+                }
+                chunk_len = 0; 
             }
+            src += (zh_punc_len > 0) ? zh_punc_len : 1; 
+        } else {
+            if (chunk_len + char_bytes > MAX_CHUNK_BYTES) {
+                chunk_buf[chunk_len] = '\0';
+                char *text_copy = strdup(chunk_buf);
+                if (text_copy) {
+                    if (xQueueSend(tts_queue, &text_copy, portMAX_DELAY) != pdTRUE) free(text_copy);
+                }
+                chunk_len = 0;
+            }
+
+            for (int i = 0; i < char_bytes; i++) {
+                chunk_buf[chunk_len++] = src[i];
+            }
+            src += char_bytes;
         }
-
-        // 🎯 拦截 B：处理全角中文标点
-        int zh_punc_len = skip_zh_punctuation(src);
-        if (zh_punc_len > 0) {
-            src += zh_punc_len; // 跳过这 3 个字节
-            continue;
-        }
-
-        // ✅ 安全放行：正常的文字，拷贝过去
-        *dst++ = *src++;
-    }
-    
-    *dst = '\0'; // 重新安全封口
-
-    // 3. 如果过滤完之后，发现这句话全是标点（变成空字符串了），就直接丢弃
-    if (strlen(text_copy) == 0) {
-        free(text_copy);
-        return;
     }
 
-    // 4. 扔进队列，如果满了就不等了，直接丢弃
-    if (xQueueSend(tts_queue, &text_copy, 0) != pdTRUE) {
-        ESP_LOGW(TAG, "⚠️ TTS 队伍太长，该句被丢弃");
-        free(text_copy); // 发送失败也要记得释放内存
-    } else {
-        // ESP_LOGI(TAG, "🔊 净化后送入TTS: %s", text_copy); // 调试时可以打开看看效果
+    if (chunk_len > 0) {
+        chunk_buf[chunk_len] = '\0';
+        char *text_copy = strdup(chunk_buf);
+        if (text_copy) {
+            if (xQueueSend(tts_queue, &text_copy, portMAX_DELAY) != pdTRUE) free(text_copy);
+        }
     }
 }
 

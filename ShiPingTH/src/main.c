@@ -2,197 +2,85 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/semphr.h"
-#include "driver/gpio.h"
-#include "driver/i2c.h"
-#include "esp_heap_caps.h"
-#include "esp_log.h"
-#include "soc/gpio_reg.h"
-#include "esp_rom_sys.h"
-#include "nvs_flash.h"
+#include "freertos/event_groups.h"
+#include "esp_system.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
-#include "esp_netif.h"
+#include "esp_log.h"
+#include "nvs_flash.h"
+#include "esp_camera.h"
 #include "esp_http_server.h"
-#include "ov7725_regs.h"
+#include "esp_netif.h"
+#include "led_strip.h"
 
-static const char *TAG = "OV7725_FIFO";
+#define WIFI_SSID      "RUN"
+#define WIFI_PASS      "88888888"
 
-#define WIFI_SSID "RUN"
-#define WIFI_PASS "88888888"
+static const char *TAG = "CAMERA_STREAM";
 
-#define PIN_SCL     1
-#define PIN_SDA     2
-#define PIN_VSYNC   8
-#define PIN_WEN     9
-#define PIN_WRST    10
-#define PIN_RRST    11
-#define PIN_RCLK    12
+#define PART_BOUNDARY "123456789000000000000987654321"
+static const char* _STREAM_CONTENT_TYPE = "multipart/x-mixed-replace;boundary=" PART_BOUNDARY;
+static const char* _STREAM_BOUNDARY = "\r\n--" PART_BOUNDARY "\r\n";
+static const char* _STREAM_PART = "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
 
-#define IMG_WIDTH   320
-#define IMG_HEIGHT  240
-#define FRAME_SIZE  (IMG_WIDTH * IMG_HEIGHT * 2)
+#define PIN_CAM_XCLK   15
+#define PIN_CAM_SIOD   4
+#define PIN_CAM_SIOC   5
+#define PIN_CAM_Y9     16
+#define PIN_CAM_Y8     17
+#define PIN_CAM_Y7     18
+#define PIN_CAM_Y6     12
+#define PIN_CAM_Y5     10
+#define PIN_CAM_Y4     8
+#define PIN_CAM_Y3     9
+#define PIN_CAM_Y2     11
+#define PIN_CAM_VSYNC  6
+#define PIN_CAM_HREF   7
+#define PIN_CAM_PCLK   13
 
-#define I2C_MASTER_NUM   I2C_NUM_0
+static camera_config_t camera_config = {
+    .pin_pwdn     = -1,
+    .pin_reset    = -1,
+    .pin_xclk     = PIN_CAM_XCLK,
+    .pin_sccb_sda = PIN_CAM_SIOD,
+    .pin_sccb_scl = PIN_CAM_SIOC,
 
-uint8_t *frame_buffer = NULL;
-SemaphoreHandle_t vsync_semaphore = NULL;
+    .pin_d7       = PIN_CAM_Y9,
+    .pin_d6       = PIN_CAM_Y8,
+    .pin_d5       = PIN_CAM_Y7,
+    .pin_d4       = PIN_CAM_Y6,
+    .pin_d3       = PIN_CAM_Y5,
+    .pin_d2       = PIN_CAM_Y4,
+    .pin_d1       = PIN_CAM_Y3,
+    .pin_d0       = PIN_CAM_Y2,
+    .pin_vsync    = PIN_CAM_VSYNC,
+    .pin_href     = PIN_CAM_HREF,
+    .pin_pclk     = PIN_CAM_PCLK,
+
+    .xclk_freq_hz = 20000000,
+    .ledc_timer   = LEDC_TIMER_0,
+    .ledc_channel = LEDC_CHANNEL_0,
+
+    .pixel_format = PIXFORMAT_RGB565,
+    .frame_size   = FRAMESIZE_QVGA,
+    .jpeg_quality = 12,
+    .fb_count     = 1,
+    .grab_mode    = CAMERA_GRAB_WHEN_EMPTY
+};
 
 const char* index_html =
-"<!DOCTYPE html><html><head><title>ESP32-S3 摄像头实时图传</title>"
+"<!DOCTYPE html><html><head><title>ESP32-S3 Camera Stream</title>"
 "<style>body{background:#222;color:#fff;text-align:center;font-family:sans-serif;}"
-"canvas{background:#000;border:2px solid #555;width:640px;height:480px;image-rendering:pixelated;}</style></head>"
-"<body><h2>ESP32-S3 Raw Stream</h2><canvas id='cam' width='320' height='240'></canvas><br><br>"
-"<button onclick='s=!s;this.innerText=s?\"模式：小端 (已切换)\":\"模式：大端 (默认)\"'>修复偏色 (Swap Bytes)</button>"
-"<p id='fps'>FPS: 0</p>"
-"<script>const ctx=document.getElementById('cam').getContext('2d');"
-"const imgData=ctx.createImageData(320,240);let s=true,f=0;"
+"img{max-width:100%;border:2px solid #555;}</style></head>"
+"<body><h2>ESP32-S3 Camera Stream</h2>"
+"<img id='stream' src='/stream' />"
+"<p id='fps'>Connecting...</p>"
+"<script>"
+"let f=0;"
 "setInterval(()=>{document.getElementById('fps').innerText='FPS: '+f;f=0;},1000);"
-"async function st(){try{let r=await fetch('/frame');if(r.ok){"
-"let b=await r.arrayBuffer(),a=new Uint8Array(b);"
-"for(let i=0,j=0;i<153600;i+=2,j+=4){"
-"let p=s?((a[i+1]<<8)|a[i]):((a[i]<<8)|a[i+1]);"
-"imgData.data[j]=(p>>8)&0xF8;imgData.data[j+1]=(p>>3)&0xFC;"
-"imgData.data[j+2]=(p<<3)&0xF8;imgData.data[j+3]=255;}"
-"ctx.putImageData(imgData,0,0);f++;}}catch(e){}"
-"requestAnimationFrame(st);}st();</script></body></html>";
-
-static void IRAM_ATTR vsync_isr_handler(void *arg)
-{
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    xSemaphoreGiveFromISR(vsync_semaphore, &xHigherPriorityTaskWoken);
-    if (xHigherPriorityTaskWoken) {
-        portYIELD_FROM_ISR();
-    }
-}
-
-static inline uint8_t read_fifo_byte_fast(void)
-{
-    REG_WRITE(GPIO_OUT_W1TS_REG, (1 << PIN_RCLK));
-    __asm__ __volatile__("nop\nnop\nnop\nnop\nnop\nnop\nnop\nnop");
-
-    uint32_t in_val = REG_READ(GPIO_IN_REG);
-
-    REG_WRITE(GPIO_OUT_W1TC_REG, (1 << PIN_RCLK));
-    __asm__ __volatile__("nop\nnop\nnop\nnop");
-
-    uint8_t data = ((in_val >> 4) & 0x0F) | ((in_val >> 11) & 0xF0);
-
-    return data;
-}
-
-void init_camera_gpios(void)
-{
-    gpio_config_t io_conf = {};
-
-    io_conf.intr_type = GPIO_INTR_DISABLE;
-    io_conf.mode = GPIO_MODE_OUTPUT;
-    io_conf.pin_bit_mask = (1ULL << PIN_WEN) | (1ULL << PIN_WRST) |
-                           (1ULL << PIN_RRST) | (1ULL << PIN_RCLK);
-    io_conf.pull_down_en = 0;
-    io_conf.pull_up_en = 0;
-    gpio_config(&io_conf);
-
-    gpio_set_level(PIN_WEN, 0);
-    gpio_set_level(PIN_WRST, 1);
-    gpio_set_level(PIN_RRST, 1);
-    gpio_set_level(PIN_RCLK, 0);
-
-    io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.pin_bit_mask = (1ULL << 4) | (1ULL << 5) | (1ULL << 6) | (1ULL << 7) |
-                           (1ULL << 15) | (1ULL << 16) | (1ULL << 17) | (1ULL << 18);
-    gpio_config(&io_conf);
-
-    io_conf.intr_type = GPIO_INTR_POSEDGE;
-    io_conf.pin_bit_mask = (1ULL << PIN_VSYNC);
-    gpio_config(&io_conf);
-
-    gpio_install_isr_service(0);
-    gpio_isr_handler_add(PIN_VSYNC, vsync_isr_handler, NULL);
-}
-
-esp_err_t sccb_write_reg(uint8_t reg, uint8_t val)
-{
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (OV7725_SCCB_ADDR << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(cmd, reg, true);
-    i2c_master_write_byte(cmd, val, true);
-    i2c_master_stop(cmd);
-    esp_err_t ret = i2c_master_cmd_begin(I2C_MASTER_NUM, cmd, pdMS_TO_TICKS(100));
-    i2c_cmd_link_delete(cmd);
-    return ret;
-}
-
-esp_err_t sccb_read_reg(uint8_t reg, uint8_t *val)
-{
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (OV7725_SCCB_ADDR << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(cmd, reg, true);
-    i2c_master_stop(cmd);
-    esp_err_t ret = i2c_master_cmd_begin(I2C_MASTER_NUM, cmd, pdMS_TO_TICKS(100));
-    i2c_cmd_link_delete(cmd);
-    if (ret != ESP_OK) return ret;
-
-    cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (OV7725_SCCB_ADDR << 1) | I2C_MASTER_READ, true);
-    i2c_master_read_byte(cmd, val, I2C_MASTER_NACK);
-    i2c_master_stop(cmd);
-    ret = i2c_master_cmd_begin(I2C_MASTER_NUM, cmd, pdMS_TO_TICKS(100));
-    i2c_cmd_link_delete(cmd);
-    return ret;
-}
-
-void init_sccb(void)
-{
-    i2c_config_t conf = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = PIN_SDA,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_io_num = PIN_SCL,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = 100000,
-    };
-    i2c_param_config(I2C_MASTER_NUM, &conf);
-    i2c_driver_install(I2C_MASTER_NUM, conf.mode, 0, 0, 0);
-}
-
-esp_err_t ov7725_init(void)
-{
-    uint8_t pid = 0, ver = 0;
-    esp_err_t ret;
-
-    ret = sccb_read_reg(OV7725_PID, &pid);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "读取 PID 失败: %s", esp_err_to_name(ret));
-        return ret;
-    }
-
-    ret = sccb_read_reg(OV7725_VER, &ver);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "读取 VER 失败: %s", esp_err_to_name(ret));
-        return ret;
-    }
-
-    ESP_LOGI(TAG, "OV7725 PID=0x%02X, VER=0x%02X", pid, ver);
-
-    if (pid != OV7725_PID_VALUE) {
-        ESP_LOGW(TAG, "PID 不匹配，期望 0x%02X，实际 0x%02X", OV7725_PID_VALUE, pid);
-    }
-
-    for (int i = 0; i < OV7725_QVGA_RGB565_SIZE; i++) {
-        ret = sccb_write_reg(ov7725_qvga_rgb565[i].reg, ov7725_qvga_rgb565[i].val);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "写入寄存器 0x%02X 失败", ov7725_qvga_rgb565[i].reg);
-            return ret;
-        }
-    }
-
-    ESP_LOGI(TAG, "OV7725 QVGA RGB565 配置完成");
-    return ESP_OK;
-}
+"const img=document.getElementById('stream');"
+"img.onload=()=>{f++;};"
+"</script></body></html>";
 
 static esp_err_t index_handler(httpd_req_t *req)
 {
@@ -200,104 +88,173 @@ static esp_err_t index_handler(httpd_req_t *req)
     return httpd_resp_send(req, index_html, HTTPD_RESP_USE_STRLEN);
 }
 
-static esp_err_t frame_handler(httpd_req_t *req)
+static esp_err_t stream_handler(httpd_req_t *req)
 {
-    ESP_LOGI("FRAME", "收到帧请求，开始采集...");
+    camera_fb_t *fb = NULL;
+    esp_err_t res = ESP_OK;
+    size_t _jpg_buf_len = 0;
+    uint8_t *_jpg_buf = NULL;
+    char part_buf[64];
 
-    esp_err_t sem_ret = xSemaphoreTake(vsync_semaphore, pdMS_TO_TICKS(2000));
-    if (sem_ret != pdTRUE) {
-        ESP_LOGE("FRAME", "等待 VSYNC 超时！检查摄像头连接");
-        httpd_resp_set_status(req, "500 Internal Server Error");
-        return httpd_resp_send(req, "VSYNC timeout", 14);
+    res = httpd_resp_set_type(req, _STREAM_CONTENT_TYPE);
+    if (res != ESP_OK) return res;
+
+    ESP_LOGI(TAG, "Client connected to stream");
+
+    while (true) {
+        fb = esp_camera_fb_get();
+        if (!fb) {
+            ESP_LOGE(TAG, "Camera capture failed");
+            res = ESP_FAIL;
+            break;
+        }
+
+        if (fb->format != PIXFORMAT_JPEG) {
+            bool jpeg_converted = frame2jpg(fb, 80, &_jpg_buf, &_jpg_buf_len);
+            esp_camera_fb_return(fb);
+            fb = NULL;
+            if (!jpeg_converted) {
+                ESP_LOGE(TAG, "JPEG compression failed");
+                res = ESP_FAIL;
+                break;
+            }
+        } else {
+            _jpg_buf_len = fb->len;
+            _jpg_buf = fb->buf;
+        }
+
+        if (res == ESP_OK) {
+            size_t hlen = snprintf(part_buf, 64, _STREAM_PART, _jpg_buf_len);
+            res = httpd_resp_send_chunk(req, part_buf, hlen);
+        }
+
+        if (res == ESP_OK) {
+            res = httpd_resp_send_chunk(req, (const char *)_jpg_buf, _jpg_buf_len);
+        }
+
+        if (res == ESP_OK) {
+            res = httpd_resp_send_chunk(req, _STREAM_BOUNDARY, strlen(_STREAM_BOUNDARY));
+        }
+
+        if (fb) {
+            esp_camera_fb_return(fb);
+            fb = NULL;
+            _jpg_buf = NULL;
+        } else if (_jpg_buf) {
+            free(_jpg_buf);
+            _jpg_buf = NULL;
+        }
+
+        if (res != ESP_OK) {
+            ESP_LOGW(TAG, "Stream send failed or client disconnected");
+            break;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
-    ESP_LOGI("FRAME", "VSYNC 信号收到，开始写入 FIFO");
 
-    gpio_set_level(PIN_WRST, 0);
-    esp_rom_delay_us(1);
-    gpio_set_level(PIN_WRST, 1);
-
-    gpio_set_level(PIN_WEN, 1);
-
-    sem_ret = xSemaphoreTake(vsync_semaphore, pdMS_TO_TICKS(2000));
-    if (sem_ret != pdTRUE) {
-        ESP_LOGE("FRAME", "等待第二 VSYNC 超时！");
-        gpio_set_level(PIN_WEN, 0);
-        httpd_resp_set_status(req, "500 Internal Server Error");
-        return httpd_resp_send(req, "VSYNC2 timeout", 15);
-    }
-    gpio_set_level(PIN_WEN, 0);
-    ESP_LOGI("FRAME", "FIFO 写入完成，开始读取");
-
-    gpio_set_level(PIN_RRST, 0);
-    esp_rom_delay_us(1);
-    gpio_set_level(PIN_RRST, 1);
-
-    uint32_t ptr = 0;
-    for (uint32_t i = 0; i < FRAME_SIZE; i++) {
-        frame_buffer[ptr++] = read_fifo_byte_fast();
-    }
-
-    ESP_LOGI("FRAME", "读取完成，前16字节:");
-    ESP_LOGI("FRAME", "%02X %02X %02X %02X %02X %02X %02X %02X",
-             frame_buffer[0], frame_buffer[1], frame_buffer[2], frame_buffer[3],
-             frame_buffer[4], frame_buffer[5], frame_buffer[6], frame_buffer[7]);
-    ESP_LOGI("FRAME", "%02X %02X %02X %02X %02X %02X %02X %02X",
-             frame_buffer[8], frame_buffer[9], frame_buffer[10], frame_buffer[11],
-             frame_buffer[12], frame_buffer[13], frame_buffer[14], frame_buffer[15]);
-
-    uint32_t non_zero = 0;
-    uint32_t unique_count = 0;
-    for (uint32_t i = 0; i < FRAME_SIZE; i++) {
-        if (frame_buffer[i] != 0) non_zero++;
-    }
-    for (uint32_t i = 2; i < 100; i++) {
-        if (frame_buffer[i] != frame_buffer[i-2]) unique_count++;
-    }
-    ESP_LOGI("FRAME", "非零字节数: %lu / %lu", non_zero, FRAME_SIZE);
-    ESP_LOGI("FRAME", "前100字节中不同值的像素对数: %lu", unique_count);
-
-    for (int i = 0; i < 4; i++) {
-        uint16_t pixel = (frame_buffer[i*2] << 8) | frame_buffer[i*2+1];
-        uint8_t r = (pixel >> 11) & 0x1F;
-        uint8_t g = (pixel >> 5) & 0x3F;
-        uint8_t b = pixel & 0x1F;
-        ESP_LOGI("FRAME", "像素%d: 0x%04X -> R=%d G=%d B=%d", i, pixel, r, g, b);
-    }
-
-    httpd_resp_set_type(req, "application/octet-stream");
-    return httpd_resp_send(req, (const char *)frame_buffer, FRAME_SIZE);
+    ESP_LOGI(TAG, "Stream closed");
+    return res;
 }
 
-void app_main(void)
+void start_camera_server()
 {
-    ESP_LOGI(TAG, "系统启动，准备点亮 AR 眼镜的视野...");
+    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    config.server_port = 80;
 
-    nvs_flash_init();
-    esp_netif_init();
-    esp_event_loop_create_default();
+    httpd_uri_t index_uri = {
+        .uri       = "/",
+        .method    = HTTP_GET,
+        .handler   = index_handler,
+        .user_ctx  = NULL
+    };
 
-    vsync_semaphore = xSemaphoreCreateBinary();
+    httpd_uri_t stream_uri = {
+        .uri       = "/stream",
+        .method    = HTTP_GET,
+        .handler   = stream_handler,
+        .user_ctx  = NULL
+    };
 
-    frame_buffer = (uint8_t *)heap_caps_malloc(FRAME_SIZE, MALLOC_CAP_SPIRAM);
-    if (frame_buffer == NULL) {
-        ESP_LOGE(TAG, "PSRAM 内存分配失败！");
-        ESP_LOGE(TAG, "请确认: 1) 板载有 PSRAM  2) sdkconfig 已启用 CONFIG_SPIRAM=y");
-        return;
+    httpd_handle_t server = NULL;
+    ESP_LOGI(TAG, "Starting web server on port: '%d'", config.server_port);
+    if (httpd_start(&server, &config) == ESP_OK) {
+        httpd_register_uri_handler(server, &index_uri);
+        httpd_register_uri_handler(server, &stream_uri);
     }
-    ESP_LOGI(TAG, "PSRAM 显存分配成功: %d Bytes", FRAME_SIZE);
+}
 
-    init_sccb();
-    init_camera_gpios();
+#define WS2812_PIN 48
+#define WS2812_NUM 1
 
-    esp_err_t ret = ov7725_init();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "OV7725 初始化失败！");
-        return;
+static led_strip_handle_t configure_led(void)
+{
+    led_strip_config_t strip_config = {
+        .strip_gpio_num = WS2812_PIN,
+        .max_leds = WS2812_NUM,
+    };
+
+    led_strip_rmt_config_t rmt_config = {
+        .resolution_hz = 10 * 1000 * 1000,
+        .flags.with_dma = false,
+    };
+
+    led_strip_handle_t led_strip;
+    ESP_ERROR_CHECK(led_strip_new_rmt_device(&strip_config, &rmt_config, &led_strip));
+    return led_strip;
+}
+
+static void set_rainbow_color(led_strip_handle_t strip, uint8_t pos)
+{
+    uint8_t r = 0, g = 0, b = 0;
+    if (pos < 85) {
+        r = pos * 3;
+        g = 255 - pos * 3;
+        b = 0;
+    } else if (pos < 170) {
+        pos -= 85;
+        r = 255 - pos * 3;
+        g = 0;
+        b = pos * 3;
+    } else {
+        pos -= 170;
+        r = 0;
+        g = pos * 3;
+        b = 255 - pos * 3;
     }
 
-    esp_netif_create_default_wifi_sta();
+    r /= 10;
+    g /= 10;
+    b /= 10;
+
+    led_strip_set_pixel(strip, 0, g, r, b);
+}
+
+static void rainbow_task(void *arg)
+{
+    led_strip_handle_t led_strip = (led_strip_handle_t)arg;
+    uint8_t color_pos = 0;
+
+    ESP_LOGI(TAG, "彩虹渐变任务启动");
+
+    while (1) {
+        set_rainbow_color(led_strip, color_pos);
+        led_strip_refresh(led_strip);
+
+        color_pos++;
+
+        vTaskDelay(pdMS_TO_TICKS(15));
+    }
+}
+
+static void wifi_init_sta(void)
+{
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    esp_netif_t *netif = esp_netif_create_default_wifi_sta();
+
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    esp_wifi_init(&cfg);
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
     wifi_config_t wifi_config = {
         .sta = {
@@ -306,25 +263,55 @@ void app_main(void)
         },
     };
 
-    esp_wifi_set_mode(WIFI_MODE_STA);
-    esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
-    esp_wifi_start();
-    esp_wifi_connect();
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_ERROR_CHECK(esp_wifi_connect());
 
-    ESP_LOGI(TAG, "正在连接 Wi-Fi... 请注意观察串口打印的 IP 地址！");
+    ESP_LOGI(TAG, "Waiting for IP address...");
+    vTaskDelay(pdMS_TO_TICKS(5000));
 
-    httpd_config_t server_config = HTTPD_DEFAULT_CONFIG();
-    server_config.max_uri_handlers = 8;
-    server_config.core_id = 1;
+    esp_netif_ip_info_t ip_info;
+    esp_netif_get_ip_info(netif, &ip_info);
+    ESP_LOGI(TAG, "Connected! IP Address: " IPSTR, IP2STR(&ip_info.ip));
+}
 
-    httpd_handle_t server = NULL;
-    if (httpd_start(&server, &server_config) == ESP_OK) {
-        httpd_uri_t uri_index = { .uri = "/", .method = HTTP_GET, .handler = index_handler };
-        httpd_uri_t uri_frame = { .uri = "/frame", .method = HTTP_GET, .handler = frame_handler };
-        httpd_register_uri_handler(server, &uri_index);
-        httpd_register_uri_handler(server, &uri_frame);
-        ESP_LOGI(TAG, "Web 服务器已启动！");
+void app_main(void)
+{
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+
+    ESP_LOGI(TAG, "初始化 WS2812...");
+    led_strip_handle_t led_strip = configure_led();
+    led_strip_clear(led_strip);
+    xTaskCreate(rainbow_task, "rainbow", 2048, (void *)led_strip, 5, NULL);
+
+    ESP_LOGI(TAG, "正在初始化摄像头...");
+
+    esp_err_t err = esp_camera_init(&camera_config);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Camera Init Failed: 0x%x", err);
+        ESP_LOGE(TAG, "请检查摄像头连接和引脚配置");
+        return;
+    }
+    ESP_LOGI(TAG, "摄像头初始化成功！");
+
+    sensor_t *s = esp_camera_sensor_get();
+    if (s) {
+        ESP_LOGI(TAG, "传感器 PID: 0x%02X", s->id.PID);
+        ESP_LOGI(TAG, "传感器 VER: 0x%02X", s->id.VER);
+        s->set_vflip(s, 0);
+        s->set_hmirror(s, 0);
     }
 
-    ESP_LOGI(TAG, "图像分辨率: %dx%d, 帧大小: %d Bytes (RGB565)", IMG_WIDTH, IMG_HEIGHT, FRAME_SIZE);
+    wifi_init_sta();
+
+    start_camera_server();
+
+    ESP_LOGI(TAG, "Camera Stream Server is ready.");
+    ESP_LOGI(TAG, "Open http://<IP>/stream in your browser.");
 }

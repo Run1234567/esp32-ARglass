@@ -206,11 +206,8 @@ void audio_hub_task(void *pvParameters) {
                 xRingbufferSend(sd_ringbuf, audioBuffer, bytesRead, 0);
             }
 
-            // ? 4. 发给 YIN 测音任务
-            // 如果只有声音大于 50dB 才发，可以省下一大笔计算资源
-            if (yin_ringbuf != NULL && db_value > 35.0f) {
-                // 等待时间设为 0。如果 YIN 任务算得太慢导致池子满了，
-                // Hub 会直接丢弃这帧数据，绝不卡死自己！
+            // 4. 发给 YIN 测音任务
+            if (yin_ringbuf != NULL && db_value > 35.0f && send_pitch_data) {
                 xRingbufferSend(yin_ringbuf, audioBuffer, bytesRead, 0);
             }
             // ? 4. 无情地把声音灌给 AI 引擎
@@ -295,64 +292,74 @@ void novel_read_task(void *pvParameters) {
     vTaskDelete(NULL);
 }
 // ==========================================
-// ? 独立任务：高精度绝对音感提取 (YIN) (已修复死锁漏洞)
+// 独立任务：高精度绝对音感提取 (YIN) (动态启停版)
 // ==========================================
+TaskHandle_t yin_task_handle = NULL;
+
+void yin_pitch_task(void *pvParameters);
+
+void start_yin_pitch_task(void) {
+    if (yin_task_handle == NULL) {
+        send_pitch_data = true;
+        size_t dummy;
+        void *stale;
+        while ((stale = xRingbufferReceive(yin_ringbuf, &dummy, 0)) != NULL) {
+            vRingbufferReturnItem(yin_ringbuf, stale);
+        }
+        xTaskCreatePinnedToCore(yin_pitch_task, "yin_task", 8192, NULL, 3, &yin_task_handle, 1);
+    }
+}
+
+void stop_yin_pitch_task(void) {
+    if (yin_task_handle != NULL) {
+        send_pitch_data = false;
+    }
+}
+
 void yin_pitch_task(void *pvParameters) {
-    const size_t target_samples = 2048; // 每次攒够 2048 个点算一次
+    const size_t target_samples = 2048;
     int16_t *accum_buffer = malloc(target_samples * sizeof(int16_t));
     size_t current_count = 0;
     size_t item_size;
 
-    ESP_LOGI("YIN_TASK", "? 独立测音任务已启动，正在后台监听...");
+    ESP_LOGI("YIN_TASK", "独立测音任务已分配内存并动态启动！");
 
-    while (1) {
-        // 从专属缓冲池里捞数据
-        void *audio_data = xRingbufferReceive(yin_ringbuf, &item_size, portMAX_DELAY);
-        
+    while (send_pitch_data) {
+        void *audio_data = xRingbufferReceive(yin_ringbuf, &item_size, pdMS_TO_TICKS(100));
+
         if (audio_data != NULL) {
             size_t samples_received = item_size / sizeof(int16_t);
 
-            // ? 修复核心：计算水池还能装多少，哪怕溢出了也只取需要的部分填满
             size_t space_left = target_samples - current_count;
             size_t samples_to_copy = (samples_received < space_left) ? samples_received : space_left;
 
             memcpy(&accum_buffer[current_count], audio_data, samples_to_copy * sizeof(int16_t));
             current_count += samples_to_copy;
 
-            // 用完必须把内存还给 RingBuffer
             vRingbufferReturnItem(yin_ringbuf, audio_data);
 
-            // 水池满了，开始高强度计算！
             if (current_count >= target_samples) {
-                // 调用 YIN 算法
                 float exact_freq = calculate_pitch_yin(accum_buffer, target_samples, 16000);
-                
-                if (exact_freq > 20.0f) {
-                    //ESP_LOGI("PITCH_RESULT", "? 抓到声音了！当前主频率: %.2f Hz", exact_freq);
-                    print_pitch_from_freq(exact_freq);
 
-                    if (send_pitch_data) {
-                        static TickType_t last_p_time = 0;
-                        if (xTaskGetTickCount() - last_p_time > pdMS_TO_TICKS(100)) {
-                            char p_cmd[20];
-                            snprintf(p_cmd, sizeof(p_cmd), "PH:%.1f", exact_freq);
-                            my_uart_send(p_cmd);
-                            last_p_time = xTaskGetTickCount();
-                        }
+                if (exact_freq > 20.0f) {
+                    print_pitch_from_freq(exact_freq);
+                    static TickType_t last_p_time = 0;
+                    if (xTaskGetTickCount() - last_p_time > pdMS_TO_TICKS(100)) {
+                        char p_cmd[20];
+                        snprintf(p_cmd, sizeof(p_cmd), "PH:%.1f", exact_freq);
+                        my_uart_send(p_cmd);
+                        last_p_time = xTaskGetTickCount();
                     }
                 }
-                else {
-                    // 如果环境全是呼呼的风声底噪，YIN 算法会返回 0，这句一定会打印！
-                    // ESP_LOGW("PITCH_RESULT", "? 声音杂乱无固定周期 (非乐音)");
-                }
-                
-                // 清空水池，准备攒下一波
-                current_count = 0; 
+                current_count = 0;
+                vTaskDelay(pdMS_TO_TICKS(10));
             }
         }
     }
-    
+
     free(accum_buffer);
+    yin_task_handle = NULL;
+    ESP_LOGI("YIN_TASK", "界面已关闭，测音任务安全退出，已归还 8KB 内存！");
     vTaskDelete(NULL);
 }
 void app_main(void) {
@@ -420,7 +427,6 @@ void app_main(void) {
     // 启动连接
     esp_websocket_client_start(ws_client);
     my_uart_init();
-    take_photo_to_PZ_folder();
     // 4. 开启独立线程：无情地抓取麦克风数据发给基站
 // ? 核心救命代码：强制绑定到 Core 1 (参数最后的 1) ?
     
@@ -432,11 +438,9 @@ void app_main(void) {
     
     // 3. 小说读取任务
     xTaskCreatePinnedToCore(novel_read_task, "novel_task", 4096 * 2, NULL, 4, NULL, 1);
-    xTaskCreatePinnedToCore(yin_pitch_task, "yin_task", 8192, NULL, 3, NULL, 1);
     tts_speak("贾维斯系统已启动。主脑连接成功，正在等待指令。");
    // 主线程可在此挂起
     while(1) {
-        my_uart_send("TEMP:52");
         vTaskDelay(pdMS_TO_TICKS(10000)); 
     }
 }

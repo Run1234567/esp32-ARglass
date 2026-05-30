@@ -164,29 +164,19 @@ void test_read_novel_next_chunk(void) {
     current_file_offset += valid_len; 
     
     fclose(f); 
-    clean_text_for_tts(read_buffer); // 清理乱码 
+    clean_text_for_tts(read_buffer);
     
     ESP_LOGI("SD_READ", "--- 当前书签: %lu ---" , current_file_offset); 
-    printf("%s\n\n" , read_buffer); 
 
     // ====================================================== 
-    // ✨ 核心改变：通过串口发送给 UI，带有 NOV: 前缀 
-    // ====================================================== 
-    // 分配一个稍微大一点的数组，用来装前缀 + 文本 
-    char uart_send_buf[READ_CHUNK_SIZE + 10 ]; 
-    sprintf(uart_send_buf, "NOV:%s" , read_buffer); 
-    
-    // 调用我们在 my_uart.c 写的发送函数 
-    my_uart_send(uart_send_buf); 
-
-    // ====================================================== 
-    // ✨ 新增：发声前查岗，只有开关打开时才读出来！ 
+    // ✨ 核心分流：根据模式决定文字去向 
     // ====================================================== 
     if (global_tts_enabled == 1) { 
-        // 5. 【语音播报】 
         tts_speak(read_buffer); 
     } else { 
-        ESP_LOGI("SD_READ", "🔇 语音已关闭，本次只发文字不发声"); 
+        char uart_send_buf[READ_CHUNK_SIZE + 10]; 
+        sprintf(uart_send_buf, "NOV:%s", read_buffer); 
+        my_uart_send(uart_send_buf); 
     }
 }
 

@@ -4,12 +4,12 @@
 #include <stdint.h>
 #include <stddef.h>
 
-// ³õÊ¼»¯À®°È
+// ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 void initSpeaker(void);
 
-// ²¥·ÅÒôÆµÊý¾Ý (´«ÈëÊý¾ÝÖ¸ÕëºÍ³¤¶È)
+// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æµï¿½ï¿½ï¿½ï¿½ (ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¸ï¿½ï¿½Í³ï¿½ï¿½ï¿½)
 void playSpeaker(const uint8_t *data, size_t length);
-// ÔÚ speaker_app.h ÖÐ¼ÓÉÏ£º
-void set_speaker_volume(uint8_t vol); // ´«Èë 0 µ½ 100
+// ï¿½ï¿½ speaker_app.h ï¿½Ð¼ï¿½ï¿½Ï£ï¿½
+void set_speaker_volume(uint8_t vol); // ï¿½ï¿½ï¿½ï¿½ 0 ï¿½ï¿½ 100
 uint8_t get_speaker_volume(void);
 #endif

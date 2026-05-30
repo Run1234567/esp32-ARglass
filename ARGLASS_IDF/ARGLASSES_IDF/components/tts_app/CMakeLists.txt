@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "tts_app.c" "voice_data.c"  # <--- È·±£ÕâÁ½¸öÎÄ¼þ¶¼ÔÚÕâÀï
+    SRCS "tts_app.c" "voice_data.c"  # <--- È·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     INCLUDE_DIRS "."
-    REQUIRES esp-sr speaker_app 
+    REQUIRES esp-sr speaker_app my_uart
 )
