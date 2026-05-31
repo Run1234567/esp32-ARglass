@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
@@ -12,17 +13,23 @@
 #include "esp_http_server.h"
 #include "esp_netif.h"
 #include "led_strip.h"
+#include "driver/gpio.h"
 #include "driver/i2s_std.h"
 
 // ================= 配置区 =================
-#define WIFI_SSID      "RUN"      // 替换为你的 WiFi 名称
-#define WIFI_PASS      "88888888" // 替换为你的 WiFi 密码
+#define WIFI_SSID       "RUN"      // 替换为你的 WiFi 名称
+#define WIFI_PASS       "88888888" // 替换为你的 WiFi 密码
 
 // --- 麦克风引脚配置 (INMP441) ---
-#define I2S_SCK_PIN    41  // SCK / BCLK
-#define I2S_WS_PIN     42  // WS / LRCK
-#define I2S_SD_PIN     2   // SD / DATA IN
+#define I2S_SCK_PIN    41   // SCK / BCLK
+#define I2S_WS_PIN     42   // WS / LRCK
+#define I2S_SD_PIN     2    // SD / DATA IN
 #define SAMPLE_RATE    16000 // 16kHz 采样率
+
+// --- 扬声器引脚配置 (MAX98357) ---
+#define SPK_BCLK_PIN   39
+#define SPK_LRC_PIN    40
+#define SPK_DIN_PIN    38
 
 // --- WS2812 LED 配置 ---
 #define WS2812_PIN     48
@@ -46,8 +53,9 @@
 
 static const char *TAG = "AV_STREAM";
 
-// I2S 接收通道句柄
-i2s_chan_handle_t rx_handle = NULL; 
+// I2S 通道句柄
+i2s_chan_handle_t rx_handle = NULL; // 麦克风接收
+i2s_chan_handle_t tx_handle = NULL; // 扬声器发送
 
 // 视频流相关的宏
 #define PART_BOUNDARY "123456789000000000000987654321"
@@ -103,14 +111,13 @@ static void set_rainbow_color(led_strip_handle_t strip, uint8_t pos) {
     if (pos < 85) { r = pos * 3; g = 255 - pos * 3; b = 0; } 
     else if (pos < 170) { pos -= 85; r = 255 - pos * 3; g = 0; b = pos * 3; } 
     else { pos -= 170; r = 0; g = pos * 3; b = 255 - pos * 3; }
-    r /= 10; g /= 10; b /= 10; // 降低亮度
+    r /= 10; g /= 10; b /= 10; 
     led_strip_set_pixel(strip, 0, g, r, b);
 }
 
 static void rainbow_task(void *arg) {
     led_strip_handle_t led_strip = (led_strip_handle_t)arg;
     uint8_t color_pos = 0;
-    ESP_LOGI(TAG, "彩虹渐变任务启动");
     while (1) {
         set_rainbow_color(led_strip, color_pos);
         led_strip_refresh(led_strip);
@@ -127,8 +134,7 @@ void init_microphone() {
 
     i2s_std_config_t std_cfg = {
         .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(SAMPLE_RATE),
-        // 注意：这里必须是 32BIT，为了匹配 INMP441 的硬件时钟要求
-        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO),
+        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_STEREO),
         .gpio_cfg = {
             .mclk = I2S_GPIO_UNUSED, .bclk = I2S_SCK_PIN, .ws   = I2S_WS_PIN,
             .dout = I2S_GPIO_UNUSED, .din  = I2S_SD_PIN,
@@ -137,7 +143,7 @@ void init_microphone() {
     };
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_handle, &std_cfg));
     ESP_ERROR_CHECK(i2s_channel_enable(rx_handle));
-    ESP_LOGI(TAG, "I2S 初始化成功！");
+    ESP_LOGI(TAG, "I2S 麦克风初始化成功！");
 }
 
 void generate_wav_header(uint8_t *header, uint32_t sample_rate, uint16_t bits_per_sample, uint8_t channels) {
@@ -158,7 +164,6 @@ void generate_wav_header(uint8_t *header, uint32_t sample_rate, uint16_t bits_pe
 }
 
 // ================= 3. HTTP 服务器流处理 =================
-// 综合的 HTML：同时包含图像 img 标签和声音 audio 标签
 const char* index_html =
 "<!DOCTYPE html><html><head><meta charset='utf-8'><title>ESP32 视听双流监控</title>"
 "<style>body{background:#222;color:#fff;text-align:center;font-family:sans-serif;margin-top:20px;}"
@@ -181,7 +186,6 @@ static esp_err_t index_handler(httpd_req_t *req) {
     return httpd_resp_send(req, index_html, HTTPD_RESP_USE_STRLEN);
 }
 
-// 视频流 Handler
 static esp_err_t stream_handler(httpd_req_t *req) {
     camera_fb_t *fb = NULL;
     esp_err_t res = ESP_OK;
@@ -191,7 +195,6 @@ static esp_err_t stream_handler(httpd_req_t *req) {
 
     res = httpd_resp_set_type(req, _STREAM_CONTENT_TYPE);
     if (res != ESP_OK) return res;
-    ESP_LOGI(TAG, "Client connected to Video stream");
 
     while (true) {
         fb = esp_camera_fb_get();
@@ -220,16 +223,21 @@ static esp_err_t stream_handler(httpd_req_t *req) {
         if (res != ESP_OK) { break; }
         vTaskDelay(pdMS_TO_TICKS(10));
     }
-    ESP_LOGI(TAG, "Video Stream closed");
     return res;
 }
 
-// 音频流 Handler (已修复 32位数据提取 和 去除休眠)
 static esp_err_t audio_stream_handler(httpd_req_t *req) {
     esp_err_t res = ESP_OK;
     size_t bytes_read = 0;
-    int32_t i2s_read_buff[256]; // 读取 32位 原始数据
-    int16_t wav_buff[256];      // 发送 16位 声音数据
+
+    #define MIC_BUF_SAMPLES 512
+    int32_t *i2s_read_buff = (int32_t *)malloc(MIC_BUF_SAMPLES * sizeof(int32_t));
+    int16_t *wav_buff = (int16_t *)malloc(MIC_BUF_SAMPLES * sizeof(int16_t));
+
+    if (!i2s_read_buff || !wav_buff) {
+        ESP_LOGE(TAG, "音频流内存不足！");
+        return ESP_ERR_NO_MEM;
+    }
 
     httpd_resp_set_type(req, "audio/wav");
     ESP_LOGI(TAG, "Client connected to Audio stream...");
@@ -237,28 +245,37 @@ static esp_err_t audio_stream_handler(httpd_req_t *req) {
     uint8_t wav_header[44];
     generate_wav_header(wav_header, SAMPLE_RATE, 16, 1);
     res = httpd_resp_send_chunk(req, (const char *)wav_header, 44);
-    if (res != ESP_OK) return res;
 
-    while (1) {
-        res = i2s_channel_read(rx_handle, i2s_read_buff, sizeof(i2s_read_buff), &bytes_read, portMAX_DELAY);
+    if (res == ESP_OK) {
+        while (1) {
+            res = i2s_channel_read(rx_handle, i2s_read_buff, MIC_BUF_SAMPLES * sizeof(int32_t), &bytes_read, portMAX_DELAY);
 
-        if (res == ESP_OK && bytes_read > 0) {
-            int samples_read = bytes_read / sizeof(int32_t);
-            // 32 位转 16 位，右移 14 位提取有效声音数据
-            for (int i = 0; i < samples_read; i++) {
-                wav_buff[i] = i2s_read_buff[i] >> 14;
+            if (res == ESP_OK && bytes_read > 0) {
+                int frames_read = bytes_read / (2 * sizeof(int32_t));
+
+                for (int i = 0; i < frames_read; i++) {
+                    int32_t sample = i2s_read_buff[i * 2] >> 16;
+
+                    sample = sample * 2;
+                    if (sample > 32767)  sample = 32767;
+                    if (sample < -32768) sample = -32768;
+                    wav_buff[i] = (int16_t)sample;
+                }
+
+                res = httpd_resp_send_chunk(req, (const char *)wav_buff, frames_read * sizeof(int16_t));
+                if (res != ESP_OK) break;
             }
-            res = httpd_resp_send_chunk(req, (const char *)wav_buff, samples_read * sizeof(int16_t));
-            if (res != ESP_OK) break;
         }
     }
-    ESP_LOGI(TAG, "Audio stream closed");
+
+    free(i2s_read_buff);
+    free(wav_buff);
+
+    ESP_LOGI(TAG, "Audio stream closed.");
     return res;
 }
 
-// 统一启动 Web 服务器
 void start_webserver() {
-    // ---- 1. 配置视频和主页服务器 (端口 80) ----
     httpd_config_t config_video = HTTPD_DEFAULT_CONFIG();
     config_video.server_port = 80;
     config_video.ctrl_port = 32768;
@@ -270,10 +287,8 @@ void start_webserver() {
     if (httpd_start(&server_video, &config_video) == ESP_OK) {
         httpd_register_uri_handler(server_video, &index_uri);
         httpd_register_uri_handler(server_video, &stream_uri);
-        ESP_LOGI(TAG, "视频服务器已启动 (端口: 80)");
     }
 
-    // ---- 2. 配置音频流服务器 (端口 81) ----
     httpd_config_t config_audio = HTTPD_DEFAULT_CONFIG();
     config_audio.server_port = 81;
     config_audio.ctrl_port = 32769;
@@ -283,11 +298,144 @@ void start_webserver() {
     httpd_handle_t server_audio = NULL;
     if (httpd_start(&server_audio, &config_audio) == ESP_OK) {
         httpd_register_uri_handler(server_audio, &audio_uri);
-        ESP_LOGI(TAG, "音频独立服务器已启动 (端口: 81)");
     }
 }
 
-// ================= 4. WiFi 初始化 =================
+// ================= 4. 扬声器 I2S 初始化 =================
+void init_speaker() {
+    ESP_LOGI(TAG, "正在使用全新配置初始化 MAX98357 扬声器...");
+
+    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
+    chan_cfg.auto_clear = true;
+    ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &tx_handle, NULL));
+
+    i2s_std_config_t std_cfg = {
+        .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(16000),
+        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO),
+        .gpio_cfg = {
+            .mclk = I2S_GPIO_UNUSED,
+            .bclk = SPK_BCLK_PIN,
+            .ws   = SPK_LRC_PIN,
+            .dout = SPK_DIN_PIN,
+            .invert_flags = { .mclk_inv = false, .bclk_inv = false, .ws_inv = false },
+        },
+    };
+
+     std_cfg.slot_cfg.slot_bit_width = I2S_SLOT_BIT_WIDTH_32BIT;
+
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle, &std_cfg));
+    ESP_ERROR_CHECK(i2s_channel_enable(tx_handle));
+}
+
+// ================= 实时扩音器任务 (Mic -> Speaker) =================
+static void megaphone_task(void *arg) {
+    size_t bytes_read = 0;
+    size_t bytes_written = 0;
+
+    #define CHUNK_SAMPLES 512
+
+    int32_t *mic_buff = (int32_t *)malloc(CHUNK_SAMPLES * 2 * sizeof(int32_t));
+    int16_t *spk_buff = (int16_t *)malloc(CHUNK_SAMPLES * sizeof(int16_t));
+
+    if (!mic_buff || !spk_buff) {
+        ESP_LOGE(TAG, "扩音器内存分配失败！");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    ESP_LOGI(TAG, "🎙️->🔊 实时扩音器已启动！请对着麦克风说话...");
+
+    while (1) {
+        if (i2s_channel_read(rx_handle, mic_buff, CHUNK_SAMPLES * 2 * sizeof(int32_t), &bytes_read, portMAX_DELAY) == ESP_OK) {
+
+            int frames = bytes_read / (2 * sizeof(int32_t));
+
+            for (int i = 0; i < frames; i++) {
+                int32_t sample = mic_buff[i * 2] >> 16;
+
+                sample = sample * 4;
+
+                if (sample > 32767)  sample = 32767;
+                if (sample < -32768) sample = -32768;
+
+                spk_buff[i] = (int16_t)sample;
+            }
+
+            i2s_channel_write(tx_handle, spk_buff, frames * sizeof(int16_t), &bytes_written, portMAX_DELAY);
+        }
+    }
+
+    free(mic_buff);
+    free(spk_buff);
+    vTaskDelete(NULL);
+}
+
+void stop_speaker() {
+    if (tx_handle != NULL) {
+        ESP_LOGI(TAG, "正在关闭扬声器并强制切断物理噪声...");
+
+        i2s_channel_disable(tx_handle);
+        i2s_del_channel(tx_handle);
+        tx_handle = NULL;
+
+        gpio_reset_pin(SPK_BCLK_PIN);
+        gpio_reset_pin(SPK_LRC_PIN);
+        gpio_reset_pin(SPK_DIN_PIN);
+
+        gpio_set_direction(SPK_BCLK_PIN, GPIO_MODE_OUTPUT);
+        gpio_set_direction(SPK_LRC_PIN, GPIO_MODE_OUTPUT);
+        gpio_set_direction(SPK_DIN_PIN, GPIO_MODE_OUTPUT);
+
+        gpio_set_level(SPK_BCLK_PIN, 0);
+        gpio_set_level(SPK_LRC_PIN, 0);
+        gpio_set_level(SPK_DIN_PIN, 0);
+
+        ESP_LOGI(TAG, "扬声器总线已完全释放且引脚已强行拉低。");
+    }
+}
+
+// 扬声器测试任务（已适配单声道 + 修复栈溢出）
+static void speaker_test_task(void *arg) {
+    size_t bytes_written = 0;
+
+    #define SINE_SAMPLES 400
+    int16_t *samples = (int16_t *)calloc(SINE_SAMPLES, sizeof(int16_t));
+    int16_t *silence = (int16_t *)calloc(SINE_SAMPLES, sizeof(int16_t));
+
+    if (!samples || !silence) {
+        ESP_LOGE(TAG, "内存分配失败！");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    for (int i = 0; i < SINE_SAMPLES; i++) {
+        samples[i] = (int16_t)(10000.0 * sin(2.0 * M_PI * 440.0 * i / 16000.0));
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(600)); 
+    ESP_LOGI(TAG, "扬声器测试：开始发出清脆的 3 声‘哔’音...");
+
+    for (int count = 0; count < 3; count++) {
+        for (int j = 0; j < 25; j++) {
+            i2s_channel_write(tx_handle, samples, SINE_SAMPLES * sizeof(int16_t), &bytes_written, portMAX_DELAY);
+        }
+        for (int j = 0; j < 4; j++) {
+            i2s_channel_write(tx_handle, silence, SINE_SAMPLES * sizeof(int16_t), &bytes_written, portMAX_DELAY);
+        }
+        ESP_LOGI(TAG, "哔~");
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+
+    ESP_LOGI(TAG, "扬声器测试成功结束，正在关闭总线以进入休眠...");
+    stop_speaker();
+
+    free(samples);
+    free(silence);
+
+    vTaskDelete(NULL);
+}
+
+// ================= 5. WiFi 初始化 =================
 static void wifi_init_sta(void) {
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -315,7 +463,6 @@ static void wifi_init_sta(void) {
 
 // ================= 主函数 =================
 void app_main(void) {
-    // 1. 初始化 NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -323,32 +470,21 @@ void app_main(void) {
     }
     ESP_ERROR_CHECK(ret);
 
-    // 2. 初始化 WS2812 灯效
-    ESP_LOGI(TAG, "初始化 WS2812...");
     led_strip_handle_t led_strip = configure_led();
     led_strip_clear(led_strip);
     xTaskCreate(rainbow_task, "rainbow", 2048, (void *)led_strip, 5, NULL);
 
-    // 3. 初始化摄像头
-    ESP_LOGI(TAG, "正在初始化摄像头...");
     esp_err_t err = esp_camera_init(&camera_config);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Camera Init Failed: 0x%x", err);
-    } else {
+    if (err == ESP_OK) {
         sensor_t *s = esp_camera_sensor_get();
-        if (s) {
-            s->set_vflip(s, 0);   // 根据摆放可以修改为 1
-            s->set_hmirror(s, 0); // 根据摆放可以修改为 1
-        }
-        ESP_LOGI(TAG, "摄像头初始化成功！");
+        if (s) { s->set_vflip(s, 0); s->set_hmirror(s, 0); }
     }
 
-    // 4. 初始化麦克风
     init_microphone();
+    init_speaker();
 
-    // 5. 连接 WiFi
+    xTaskCreate(megaphone_task, "megaphone", 8192, NULL, 5, NULL);
+
     wifi_init_sta();
-
-    // 6. 启动集成服务器
     start_webserver();
 }
