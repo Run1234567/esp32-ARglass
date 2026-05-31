@@ -8,6 +8,7 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "nvs_flash.h"
 #include "esp_camera.h"
 #include "esp_http_server.h"
@@ -15,27 +16,28 @@
 #include "led_strip.h"
 #include "driver/gpio.h"
 #include "driver/i2s_std.h"
+#include "driver/spi_master.h"
+#include "esp_lcd_panel_io.h"
+#include "esp_lcd_panel_vendor.h"
+#include "esp_lcd_panel_ops.h"
+#include "lvgl.h"
 
 // ================= 配置区 =================
-#define WIFI_SSID       "RUN"      // 替换为你的 WiFi 名称
-#define WIFI_PASS       "88888888" // 替换为你的 WiFi 密码
+#define WIFI_SSID       "RUN"
+#define WIFI_PASS       "88888888"
 
-// --- 麦克风引脚配置 (INMP441) ---
-#define I2S_SCK_PIN    41   // SCK / BCLK
-#define I2S_WS_PIN     42   // WS / LRCK
-#define I2S_SD_PIN     2    // SD / DATA IN
-#define SAMPLE_RATE    16000 // 16kHz 采样率
+#define I2S_SCK_PIN    41
+#define I2S_WS_PIN     42
+#define I2S_SD_PIN     2
+#define SAMPLE_RATE    16000
 
-// --- 扬声器引脚配置 (MAX98357) ---
 #define SPK_BCLK_PIN   39
 #define SPK_LRC_PIN    40
 #define SPK_DIN_PIN    38
 
-// --- WS2812 LED 配置 ---
 #define WS2812_PIN     48
 #define WS2812_NUM     1
 
-// --- 摄像头引脚配置 ---
 #define PIN_CAM_XCLK   15
 #define PIN_CAM_SIOD   4
 #define PIN_CAM_SIOC   5
@@ -51,19 +53,29 @@
 #define PIN_CAM_HREF   7
 #define PIN_CAM_PCLK   13
 
+#define TFT_SCK_PIN    20
+#define TFT_MOSI_PIN   21
+#define TFT_CS_PIN     19
+#define TFT_DC_PIN     47
+#define TFT_RST_PIN    14
+#define TFT_BLK_PIN    1
+
+#define TFT_WIDTH      128
+#define TFT_HEIGHT     160
+
 static const char *TAG = "AV_STREAM";
 
-// I2S 通道句柄
-i2s_chan_handle_t rx_handle = NULL; // 麦克风接收
-i2s_chan_handle_t tx_handle = NULL; // 扬声器发送
+i2s_chan_handle_t rx_handle = NULL;
+i2s_chan_handle_t tx_handle = NULL;
 
-// 视频流相关的宏
+esp_lcd_panel_handle_t panel_handle = NULL;
+esp_lcd_panel_io_handle_t io_handle = NULL;
+
 #define PART_BOUNDARY "123456789000000000000987654321"
 static const char* _STREAM_CONTENT_TYPE = "multipart/x-mixed-replace;boundary=" PART_BOUNDARY;
 static const char* _STREAM_BOUNDARY = "\r\n--" PART_BOUNDARY "\r\n";
 static const char* _STREAM_PART = "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
 
-// 摄像头配置
 static camera_config_t camera_config = {
     .pin_pwdn     = -1,
     .pin_reset    = -1,
@@ -91,7 +103,7 @@ static camera_config_t camera_config = {
     .grab_mode    = CAMERA_GRAB_WHEN_EMPTY
 };
 
-// ================= 1. WS2812 LED 功能 =================
+// ================= 1. WS2812 LED =================
 static led_strip_handle_t configure_led(void) {
     led_strip_config_t strip_config = {
         .strip_gpio_num = WS2812_PIN,
@@ -108,10 +120,10 @@ static led_strip_handle_t configure_led(void) {
 
 static void set_rainbow_color(led_strip_handle_t strip, uint8_t pos) {
     uint8_t r = 0, g = 0, b = 0;
-    if (pos < 85) { r = pos * 3; g = 255 - pos * 3; b = 0; } 
-    else if (pos < 170) { pos -= 85; r = 255 - pos * 3; g = 0; b = pos * 3; } 
+    if (pos < 85) { r = pos * 3; g = 255 - pos * 3; b = 0; }
+    else if (pos < 170) { pos -= 85; r = 255 - pos * 3; g = 0; b = pos * 3; }
     else { pos -= 170; r = 0; g = pos * 3; b = 255 - pos * 3; }
-    r /= 10; g /= 10; b /= 10; 
+    r /= 10; g /= 10; b /= 10;
     led_strip_set_pixel(strip, 0, g, r, b);
 }
 
@@ -148,7 +160,7 @@ void init_microphone() {
 
 void generate_wav_header(uint8_t *header, uint32_t sample_rate, uint16_t bits_per_sample, uint8_t channels) {
     uint32_t byte_rate = sample_rate * channels * (bits_per_sample / 8);
-    uint32_t file_size = 0xFFFFFFFF; 
+    uint32_t file_size = 0xFFFFFFFF;
     uint32_t data_size = 0xFFFFFFFF;
     const uint8_t wav_header[44] = {
         'R', 'I', 'F', 'F',
@@ -163,7 +175,7 @@ void generate_wav_header(uint8_t *header, uint32_t sample_rate, uint16_t bits_pe
     memcpy(header, wav_header, 44);
 }
 
-// ================= 3. HTTP 服务器流处理 =================
+// ================= 3. HTTP 服务器 =================
 const char* index_html =
 "<!DOCTYPE html><html><head><meta charset='utf-8'><title>ESP32 视听双流监控</title>"
 "<style>body{background:#222;color:#fff;text-align:center;font-family:sans-serif;margin-top:20px;}"
@@ -171,7 +183,7 @@ const char* index_html =
 "<body><h2>ESP32-S3 视听双流监听器</h2>"
 "<img id='stream' src='/stream' /><br>"
 "<p id='fps'>Connecting...</p>"
-"<p style='color:yellow;'>⚠️ 如果听不到声音，请确保点击下方的播放按钮</p>"
+"<p style='color:yellow;'>&#x26A0; 如果听不到声音，请确保点击下方的播放按钮</p>"
 "<audio controls autoplay id='audio_player'>您的浏览器不支持。</audio>"
 "<script>"
 "let f=0;"
@@ -217,7 +229,7 @@ static esp_err_t stream_handler(httpd_req_t *req) {
         if (res == ESP_OK) { res = httpd_resp_send_chunk(req, (const char *)_jpg_buf, _jpg_buf_len); }
         if (res == ESP_OK) { res = httpd_resp_send_chunk(req, _STREAM_BOUNDARY, strlen(_STREAM_BOUNDARY)); }
 
-        if (fb) { esp_camera_fb_return(fb); fb = NULL; _jpg_buf = NULL; } 
+        if (fb) { esp_camera_fb_return(fb); fb = NULL; _jpg_buf = NULL; }
         else if (_jpg_buf) { free(_jpg_buf); _jpg_buf = NULL; }
 
         if (res != ESP_OK) { break; }
@@ -321,7 +333,7 @@ void init_speaker() {
         },
     };
 
-     std_cfg.slot_cfg.slot_bit_width = I2S_SLOT_BIT_WIDTH_32BIT;
+    std_cfg.slot_cfg.slot_bit_width = I2S_SLOT_BIT_WIDTH_32BIT;
 
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle, &std_cfg));
     ESP_ERROR_CHECK(i2s_channel_enable(tx_handle));
@@ -343,7 +355,7 @@ static void megaphone_task(void *arg) {
         return;
     }
 
-    ESP_LOGI(TAG, "🎙️->🔊 实时扩音器已启动！请对着麦克风说话...");
+    ESP_LOGI(TAG, "实时扩音器已启动！请对着麦克风说话...");
 
     while (1) {
         if (i2s_channel_read(rx_handle, mic_buff, CHUNK_SAMPLES * 2 * sizeof(int32_t), &bytes_read, portMAX_DELAY) == ESP_OK) {
@@ -394,45 +406,160 @@ void stop_speaker() {
     }
 }
 
-// 扬声器测试任务（已适配单声道 + 修复栈溢出）
-static void speaker_test_task(void *arg) {
-    size_t bytes_written = 0;
+// ================= 屏幕初始化 (ST7735) =================
+void init_tft() {
+    ESP_LOGI(TAG, "初始化 SPI 总线...");
+    spi_bus_config_t buscfg = {
+        .sclk_io_num = TFT_SCK_PIN,
+        .mosi_io_num = TFT_MOSI_PIN,
+        .miso_io_num = -1,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = TFT_WIDTH * 16 * sizeof(uint16_t),
+    };
+    ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
 
-    #define SINE_SAMPLES 400
-    int16_t *samples = (int16_t *)calloc(SINE_SAMPLES, sizeof(int16_t));
-    int16_t *silence = (int16_t *)calloc(SINE_SAMPLES, sizeof(int16_t));
+    ESP_LOGI(TAG, "配置 LCD 面板 IO...");
+    esp_lcd_panel_io_spi_config_t io_config = {
+        .dc_gpio_num = TFT_DC_PIN,
+        .cs_gpio_num = TFT_CS_PIN,
+        .pclk_hz = 20 * 1000 * 1000,
+        .lcd_cmd_bits = 8,
+        .lcd_param_bits = 8,
+        .spi_mode = 0,
+        .trans_queue_depth = 10,
+    };
+    ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config, &io_handle));
 
-    if (!samples || !silence) {
-        ESP_LOGE(TAG, "内存分配失败！");
-        vTaskDelete(NULL);
-        return;
-    }
+    ESP_LOGI(TAG, "安装原生 ST7789 面板驱动 (向下兼容 ST7735)...");
+    esp_lcd_panel_dev_config_t panel_config = {
+        .reset_gpio_num = TFT_RST_PIN,
+        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
+        .bits_per_pixel = 16,
+    };
 
-    for (int i = 0; i < SINE_SAMPLES; i++) {
-        samples[i] = (int16_t)(10000.0 * sin(2.0 * M_PI * 440.0 * i / 16000.0));
-    }
+    ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(io_handle, &panel_config, &panel_handle));
 
-    vTaskDelay(pdMS_TO_TICKS(600)); 
-    ESP_LOGI(TAG, "扬声器测试：开始发出清脆的 3 声‘哔’音...");
+    ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
+    ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle));
 
-    for (int count = 0; count < 3; count++) {
-        for (int j = 0; j < 25; j++) {
-            i2s_channel_write(tx_handle, samples, SINE_SAMPLES * sizeof(int16_t), &bytes_written, portMAX_DELAY);
+    esp_lcd_panel_set_gap(panel_handle, 0, 0);
+
+    ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel_handle, false));
+    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
+
+    ESP_LOGI(TAG, "点亮背光...");
+    gpio_reset_pin(TFT_BLK_PIN);
+    gpio_set_direction(TFT_BLK_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level(TFT_BLK_PIN, 1);
+}
+
+// ================= LVGL 对接回调 =================
+static bool notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx) {
+    lv_disp_drv_t *disp_driver = (lv_disp_drv_t *)user_ctx;
+    lv_disp_flush_ready(disp_driver);
+    return false;
+}
+
+static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_map) {
+    esp_lcd_panel_handle_t panel = (esp_lcd_panel_handle_t) drv->user_data;
+    int x1 = area->x1;
+    int y1 = area->y1;
+    int x2 = area->x2;
+    int y2 = area->y2;
+    esp_lcd_panel_draw_bitmap(panel, x1, y1, x2 + 1, y2 + 1, color_map);
+}
+
+static void lvgl_tick_task(void *arg) {
+    lv_tick_inc(2);
+}
+
+void init_lvgl(esp_lcd_panel_handle_t panel, esp_lcd_panel_io_handle_t io) {
+    ESP_LOGI(TAG, "初始化 LVGL 核心...");
+    lv_init();
+
+    esp_lcd_panel_io_callbacks_t cbs = {
+        .on_color_trans_done = notify_lvgl_flush_ready,
+    };
+
+    #define LVGL_BUFFER_SIZE (TFT_WIDTH * TFT_HEIGHT / 10)
+    lv_color_t *buf1 = (lv_color_t *)heap_caps_malloc(LVGL_BUFFER_SIZE * sizeof(lv_color_t), MALLOC_CAP_DMA);
+    assert(buf1);
+
+    static lv_disp_draw_buf_t disp_buf;
+    lv_disp_draw_buf_init(&disp_buf, buf1, NULL, LVGL_BUFFER_SIZE);
+
+    static lv_disp_drv_t disp_drv;
+    lv_disp_drv_init(&disp_drv);
+    disp_drv.hor_res = TFT_WIDTH;
+    disp_drv.ver_res = TFT_HEIGHT;
+    disp_drv.flush_cb = lvgl_flush_cb;
+    disp_drv.draw_buf = &disp_buf;
+    disp_drv.user_data = panel;
+
+    esp_lcd_panel_io_register_event_callbacks(io, &cbs, &disp_drv);
+
+    lv_disp_drv_register(&disp_drv);
+
+    const esp_timer_create_args_t lvgl_tick_timer_args = {
+        .callback = &lvgl_tick_task,
+        .name = "lvgl_tick"
+    };
+    esp_timer_handle_t lvgl_tick_timer = NULL;
+    ESP_ERROR_CHECK(esp_timer_create(&lvgl_tick_timer_args, &lvgl_tick_timer));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(lvgl_tick_timer, 2 * 1000));
+}
+
+// ================= 极简 8x16 像素 ASCII 字库 =================
+const unsigned char font_8x16[][16] = {
+    {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00},
+    {0x00,0x00,0x00,0x10,0x28,0x28,0x28,0x44,0x44,0x7C,0x82,0x82,0x82,0x00,0x00,0x00},
+    {0x00,0x00,0x00,0xFC,0x42,0x42,0x42,0x7C,0x42,0x42,0x42,0x42,0xFC,0x00,0x00,0x00},
+    {0x00,0x00,0x00,0x3C,0x42,0x80,0x80,0x80,0x80,0x80,0x80,0x42,0x3C,0x00,0x00,0x00},
+    {0x00,0x00,0x00,0xF8,0x44,0x42,0x42,0x42,0x42,0x42,0x42,0x44,0xF8,0x00,0x00,0x00},
+    {0x00,0x00,0x00,0xFC,0x40,0x40,0x40,0x78,0x40,0x40,0x40,0x40,0xFC,0x00,0x00,0x00},
+};
+
+int get_font_index(char c) {
+    if (c == ' ') return 0;
+    if (c >= 'A' && c <= 'E') return c - 'A' + 1;
+    return 0;
+}
+
+void draw_char(int x, int y, char c, uint16_t fg_color, uint16_t bg_color) {
+    uint16_t *char_buf = (uint16_t *)heap_caps_malloc(8 * 16 * sizeof(uint16_t), MALLOC_CAP_DMA);
+    if (!char_buf) return;
+
+    int font_idx = get_font_index(c);
+
+    for (int row = 0; row < 16; row++) {
+        unsigned char row_data = font_8x16[font_idx][row];
+        for (int col = 0; col < 8; col++) {
+            if (row_data & (0x80 >> col)) {
+                char_buf[row * 8 + col] = fg_color;
+            } else {
+                char_buf[row * 8 + col] = bg_color;
+            }
         }
-        for (int j = 0; j < 4; j++) {
-            i2s_channel_write(tx_handle, silence, SINE_SAMPLES * sizeof(int16_t), &bytes_written, portMAX_DELAY);
-        }
-        ESP_LOGI(TAG, "哔~");
-        vTaskDelay(pdMS_TO_TICKS(500));
     }
 
-    ESP_LOGI(TAG, "扬声器测试成功结束，正在关闭总线以进入休眠...");
-    stop_speaker();
+    esp_lcd_panel_draw_bitmap(panel_handle, x, y, x + 8, y + 16, char_buf);
 
-    free(samples);
-    free(silence);
+    free(char_buf);
+}
 
-    vTaskDelete(NULL);
+void draw_string(int start_x, int start_y, const char *str, uint16_t fg_color, uint16_t bg_color) {
+    int x = start_x;
+    int y = start_y;
+    while (*str) {
+        draw_char(x, y, *str, fg_color, bg_color);
+        x += 8;
+        if (x + 8 > TFT_WIDTH) {
+            x = start_x;
+            y += 16;
+        }
+        str++;
+    }
 }
 
 // ================= 5. WiFi 初始化 =================
@@ -480,6 +607,27 @@ void app_main(void) {
         if (s) { s->set_vflip(s, 0); s->set_hmirror(s, 0); }
     }
 
+    init_tft();
+
+    init_lvgl(panel_handle, io_handle);
+
+    ESP_LOGI(TAG, "创建 LVGL 界面...");
+    lv_obj_t *scr = lv_scr_act();
+    lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), LV_PART_MAIN);
+
+    lv_obj_t *btn = lv_btn_create(scr);
+    lv_obj_align(btn, LV_ALIGN_CENTER, 0, -10);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(0x00A8FF), LV_PART_MAIN);
+
+    lv_obj_t *label = lv_label_create(btn);
+    lv_label_set_text(label, "J.A.R.V.I.S.");
+    lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+
+    lv_obj_t *bar = lv_bar_create(scr);
+    lv_obj_set_size(bar, 100, 10);
+    lv_obj_align(bar, LV_ALIGN_CENTER, 0, 30);
+    lv_bar_set_value(bar, 75, LV_ANIM_ON);
+
     init_microphone();
     init_speaker();
 
@@ -487,4 +635,9 @@ void app_main(void) {
 
     wifi_init_sta();
     start_webserver();
+
+    while (1) {
+        lv_timer_handler();
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
 }
