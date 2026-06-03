@@ -7,11 +7,13 @@
 #include "esp_log.h"
 #include <stdio.h>
 
-// ç«ç®­å›¾åƒå£°æ˜
+// »ğ¼ıºÍ±³¾°Í¼ÏñÉùÃ÷
 LV_IMG_DECLARE(Rocket);
+LV_IMG_DECLARE(beijing);
+LV_IMG_DECLARE(people1);
 
 // ==========================================
-//   è·‘é…·æ¸¸æˆå…¨å±€å¯¹è±¡ä¸å‚æ•°
+//   ÅÜ¿áÓÎÏ·È«¾Ö¶ÔÏóÓë²ÎÊı
 // ==========================================
 lv_obj_t  * ui_game_screen;
 static lv_obj_t  * player;
@@ -20,67 +22,92 @@ static lv_obj_t  * label_score;
 static lv_obj_t  * label_msg;
 static lv_timer_t  * game_timer;
 
-// ç‰©ç†ä¸çŠ¶æ€å‚æ•°
-static int player_y = 160;       // ç©å®¶åˆå§‹é«˜åº¦
-static float velocity_y = 0;     // å‚ç›´é€Ÿåº¦
-static float gravity = 0.4;      // é‡åŠ›åŠ é€Ÿåº¦
-static float jump_force = -10.0; // è·³è·ƒåŠ›åº¦
+// ÎïÀíÓë×´Ì¬²ÎÊı
+static int player_y = 160;       // Íæ¼Ò³õÊ¼¸ß¶È
+static float velocity_y = 0;     // ´¹Ö±ËÙ¶È
+static float gravity = 0.4;      // ÖØÁ¦¼ÓËÙ¶È
+static float jump_force = -10.0; // ÌøÔ¾Á¦¶È
 
-static int obstacle_x = 240;     // éšœç¢ç‰©åˆå§‹Xä½ç½®
-static int obstacle_speed = 3;   // éšœç¢ç‰©ç§»åŠ¨é€Ÿåº¦
+static int obstacle_x = 240;     // ÕÏ°­Îï³õÊ¼XÎ»ÖÃ
+static int obstacle_speed = 3;   // ÕÏ°­ÎïÒÆ¶¯ËÙ¶È
+
+// ±³¾°¹ö¶¯±äÁ¿
+static lv_obj_t * bg_img1;
+static lv_obj_t * bg_img2;
+static float bg_x1 = 0;
+static float bg_x2 = 480;
+static float bg_speed = 1.0;
 
 static int score = 0;
 static bool is_playing = false;
 
-// å›ºå®šå°ºå¯¸å®šä¹‰
+// ¹Ì¶¨³ß´ç¶¨Òå
 #define GROUND_Y 190
-#define PLAYER_SIZE 30
+#define PLAYER_WIDTH 50
+#define PLAYER_HEIGHT 48
 #define PLAYER_FIXED_X 40
 #define OBS_WIDTH 50
 #define OBS_HEIGHT 17
+#define BG_WIDTH 480
 
 // ==========================================
-//   æ¸¸æˆä¸»å¾ªç¯ (20ms åˆ·æ–°ä¸€æ¬¡ = 50FPS)
+//   ÓÎÏ·Ö÷Ñ­»· (20ms Ë¢ĞÂÒ»´Î = 50FPS)
 // ==========================================
 static void game_loop_cb(lv_timer_t * timer) {
     if (!is_playing) return;
 
-    // âš ï¸ å› ä¸ºè¿™æ˜¯å®šæ—¶å™¨å›è°ƒï¼Œæ“ä½œ UI å¿…é¡»ä¸Šé”ï¼
+    // ?? ÒòÎªÕâÊÇ¶¨Ê±Æ÷»Øµ÷£¬²Ù×÷ UI ±ØĞëÉÏËø£¡
     if (lvgl_port_lock(0)) {
         
-        // 1. ã€ç‰©ç†å¼•æ“ã€‘ï¼šæ›´æ–°ç©å®¶ä½ç½®
+        // 1. ¡¾ÎïÀíÒıÇæ¡¿£º¸üĞÂÍæ¼ÒÎ»ÖÃ
         velocity_y += gravity;
         player_y += (int)velocity_y;
 
-        // åœ°é¢ç¢°æ’æ£€æµ‹ (ä¸è®©ç©å®¶æ‰ä¸‹å»)
-        if (player_y >= GROUND_Y - PLAYER_SIZE) {
-            player_y = GROUND_Y - PLAYER_SIZE;
+        // µØÃæÅö×²¼ì²â (²»ÈÃÍæ¼ÒµôÏÂÈ¥)
+        if (player_y >= GROUND_Y - PLAYER_HEIGHT) {
+            player_y = GROUND_Y - PLAYER_HEIGHT;
             velocity_y = 0;
         }
 
-        // 2. ã€ä¸–ç•Œè¿è½¬ã€‘ï¼šéšœç¢ç‰©å‘å·¦ç§»åŠ¨
+        // 2. ¡¾ÊÀ½çÔË×ª¡¿£ºÕÏ°­ÎïÏò×óÒÆ¶¯
         obstacle_x -= obstacle_speed;
         
-        // éšœç¢ç‰©å‡ºç•Œï¼Œé‡ç½®ä½ç½®å¹¶åŠ åˆ†
+        // ÕÏ°­Îï³ö½ç£¬ÖØÖÃÎ»ÖÃ²¢¼Ó·Ö
         if (obstacle_x < -OBS_WIDTH) {
             obstacle_x = 240;
             score++;
             lv_label_set_text_fmt(label_score, "Score: %d", score);
             
-            // éšç€åˆ†æ•°å¢åŠ ï¼Œå¾®å¾®åŠ é€Ÿå¢åŠ éš¾åº¦ï¼
+            // Ëæ×Å·ÖÊıÔö¼Ó£¬Î¢Î¢¼ÓËÙÔö¼ÓÄÑ¶È£¡
             if (score % 5 == 0 && obstacle_speed < 18) {
                 obstacle_speed += 1;
             }
         }
 
-        // åˆ·æ–°åæ ‡åˆ°å±å¹•
-        lv_obj_set_y(player, player_y);
-        // è®©ç«ç®­ä¿æŒæ‚¬æµ®é«˜åº¦ 10 åƒç´ 
-        lv_obj_set_pos(obstacle, obstacle_x, GROUND_Y - OBS_HEIGHT - 10);
+        // 3. ¡¾ÊÓ²î¾íÖá¡¿£º±³¾°³¤Í¼»ºÂıÒÆ¶¯
+        bg_x1 -= bg_speed;
+        bg_x2 -= bg_speed;
 
-        // 3. ã€ç”Ÿæ­»åˆ¤å®šã€‘ï¼šAABB ç¢°æ’æ£€æµ‹
-        bool collision_x = (PLAYER_FIXED_X < obstacle_x + OBS_WIDTH) && (PLAYER_FIXED_X + PLAYER_SIZE > obstacle_x);
-        bool collision_y = (player_y < GROUND_Y) && (player_y + PLAYER_SIZE > GROUND_Y - OBS_HEIGHT);
+        // ÎŞ·ìÆ´½ÓÂß¼­
+        if (bg_x1 <= -BG_WIDTH) {
+            bg_x1 = bg_x2 + BG_WIDTH;
+        }
+        if (bg_x2 <= -BG_WIDTH) {
+            bg_x2 = bg_x1 + BG_WIDTH;
+        }
+
+        // Ë¢ĞÂËùÓĞÎïÌåµÄ×ø±ê
+        lv_obj_set_y(player, player_y);
+        // ÈÃ»ğ¼ı±£³ÖĞü¸¡¸ß¶È 10 ÏñËØ
+        lv_obj_set_pos(obstacle, obstacle_x, GROUND_Y - OBS_HEIGHT - 10);
+        
+        // Ë¢ĞÂ±³¾°×ø±ê
+        lv_obj_set_x(bg_img1, (int)bg_x1);
+        lv_obj_set_x(bg_img2, (int)bg_x2);
+
+        // 4. ¡¾ÉúËÀÅĞ¶¨¡¿£ºAABB Åö×²¼ì²â
+        bool collision_x = (PLAYER_FIXED_X < obstacle_x + OBS_WIDTH) && (PLAYER_FIXED_X + PLAYER_WIDTH > obstacle_x);
+        bool collision_y = (player_y < GROUND_Y) && (player_y + PLAYER_HEIGHT > GROUND_Y - OBS_HEIGHT);
 
         if (collision_x && collision_y) {
             is_playing = false;
@@ -93,57 +120,65 @@ static void game_loop_cb(lv_timer_t * timer) {
 }
 
 // ==========================================
-//   åˆå§‹åŒ–æ¸¸æˆç•Œé¢
+//   ³õÊ¼»¯ÓÎÏ·½çÃæ
 // ==========================================
 void ui_game_screen_init(void) {
     ui_game_screen = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(ui_game_screen, lv_color_hex(0x111111), 0);
 
-    // 1. åœ°é¢è£…é¥°çº¿
+    // 1. ´´½¨Á½ÕÅ³¤±³¾°Í¼ (±ØĞëÔÚ×îµ×²ã)
+    bg_img1 = lv_img_create(ui_game_screen);
+    lv_img_set_src(bg_img1, &beijing);
+    lv_obj_set_pos(bg_img1, (int)bg_x1, 0);
+
+    bg_img2 = lv_img_create(ui_game_screen);
+    lv_img_set_src(bg_img2, &beijing);
+    lv_obj_set_pos(bg_img2, (int)bg_x2, 0);
+
+    // 2. µØÃæ×°ÊÎÏß
     lv_obj_t * ground_line = lv_obj_create(ui_game_screen);
     lv_obj_set_size(ground_line, 240, 2);
     lv_obj_set_pos(ground_line, 0, GROUND_Y);
     lv_obj_set_style_bg_color(ground_line, lv_color_white(), 0);
     lv_obj_set_style_border_width(ground_line, 0, 0);
 
-    // 2. ç©å®¶ (ä¸€ä¸ªå‘å…‰çš„è“è‰²æ–¹å—)
-    player = lv_obj_create(ui_game_screen);
-    lv_obj_set_size(player, PLAYER_SIZE, PLAYER_SIZE);
-    lv_obj_set_pos(player, PLAYER_FIXED_X, GROUND_Y - PLAYER_SIZE);
-    lv_obj_set_style_bg_color(player, lv_color_hex(0x00FFFF), 0);
-    lv_obj_set_style_radius(player, 5, 0);
+    // 3. Íæ¼Ò (»»³É¾«ÃÀµÄÈËÎïÍ¼Æ¬£¡)
+    player = lv_img_create(ui_game_screen);
+    lv_img_set_src(player, &people1);
+    lv_obj_set_style_bg_opa(player, 0, 0);
     lv_obj_set_style_border_width(player, 0, 0);
+    lv_obj_set_pos(player, PLAYER_FIXED_X, GROUND_Y - PLAYER_HEIGHT);
 
-    // 3. éšœç¢ç‰© (æ¢æˆç‚«é…·çš„ç«ç®­/å¯¼å¼¹å›¾ç‰‡ï¼)
+    // 4. ÕÏ°­Îï (»»³ÉìÅ¿áµÄ»ğ¼ı/µ¼µ¯Í¼Æ¬£¡)
     obstacle = lv_img_create(ui_game_screen);
     lv_img_set_src(obstacle, &Rocket);
     lv_obj_set_pos(obstacle, obstacle_x, GROUND_Y - OBS_HEIGHT - 10);
 
-    // 4. åˆ†æ•°æ ‡ç­¾
+    // 5. ·ÖÊı±êÇ©
     label_score = lv_label_create(ui_game_screen);
     lv_obj_set_style_text_color(label_score, lv_color_white(), 0);
     lv_obj_set_style_text_font(label_score, &my_font_cn_16, 0);
     lv_label_set_text(label_score, "Score: 0");
     lv_obj_align(label_score, LV_ALIGN_TOP_MID, 0, 10);
 
-    // 5. çŠ¶æ€æç¤ºæ–‡æœ¬
+    // 6. ×´Ì¬ÌáÊ¾ÎÄ±¾
     label_msg = lv_label_create(ui_game_screen);
     lv_obj_set_style_text_color(label_msg, lv_color_hex(0xFFFF00), 0);
     lv_obj_set_style_text_align(label_msg, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(label_msg, "Swipe Right to START");
     lv_obj_align(label_msg, LV_ALIGN_CENTER, 0, -30);
 
-    // 6. åˆ›å»ºé«˜é¢‘æ¸¸æˆå®šæ—¶å™¨ (å…ˆæš‚åœ)
+    // 7. ´´½¨¸ßÆµÓÎÏ·¶¨Ê±Æ÷ (ÏÈÔİÍ£)
     game_timer = lv_timer_create(game_loop_cb, 20, NULL);
     lv_timer_pause(game_timer);
 }
 
 // ==========================================
-//   æ¸¸æˆä¸“å±æ‰‹åŠ¿æ§åˆ¶è·¯ç”±
+//   ÓÎÏ·×¨ÊôÊÖÊÆ¿ØÖÆÂ·ÓÉ
 // ==========================================
 void game_screen_handle_cmd(ui_cmd_t cmd) {
     if (cmd == UI_CMD_LEFT) {
-        // é€€å‡ºæ¸¸æˆï¼šæš‚åœå®šæ—¶å™¨ï¼Œé€€å›æ¸¸æˆåˆ—è¡¨
+        // ÍË³öÓÎÏ·£ºÔİÍ£¶¨Ê±Æ÷£¬ÍË»ØÓÎÏ·ÁĞ±í
         is_playing = false;
         lv_timer_pause(game_timer);
         
@@ -151,19 +186,24 @@ void game_screen_handle_cmd(ui_cmd_t cmd) {
         switch_to_screen(SCREEN_GAME_LIST);
     }
     else if (cmd == UI_CMD_RIGHT) {
-        // å¼€å§‹ / é‡å¯æ¸¸æˆ
+        // ¿ªÊ¼ / ÖØÆôÓÎÏ·
         if (!is_playing) {
-            player_y = GROUND_Y - PLAYER_SIZE;
+            player_y = GROUND_Y - PLAYER_HEIGHT;
             velocity_y = 0;
             obstacle_x = 240;
             obstacle_speed = 3;
+            
+            // ÖØÖÃ±³¾°Î»ÖÃ
+            bg_x1 = 0;
+            bg_x2 = BG_WIDTH;
+            
             score = 0;
             
             if (lvgl_port_lock(0)) {
                 lv_label_set_text(label_score, "Score: 0");
                 lv_obj_add_flag(label_msg, LV_OBJ_FLAG_HIDDEN);
                 lv_obj_set_y(player, player_y);
-                lv_obj_set_x(obstacle, obstacle_x);
+                lv_obj_set_pos(obstacle, obstacle_x, GROUND_Y - OBS_HEIGHT - 10);
                 lvgl_port_unlock();
             }
             
@@ -172,8 +212,8 @@ void game_screen_handle_cmd(ui_cmd_t cmd) {
         }
     }
     else if (cmd == UI_CMD_UP) {
-        // åªæœ‰å½“ç©å®¶è¸©åœ¨åœ°ä¸Šæ—¶ï¼Œæ‰å…è®¸è·³è·ƒï¼(é˜²æ­¢ç©ºä¸­è¿è·³)
-        if (is_playing && player_y >= GROUND_Y - PLAYER_SIZE) {
+        // Ö»ÓĞµ±Íæ¼Ò²ÈÔÚµØÉÏÊ±£¬²ÅÔÊĞíÌøÔ¾ (·ÀÖ¹¿ÕÖĞÁ¬Ìø)
+        if (is_playing && player_y >= GROUND_Y - PLAYER_HEIGHT) {
             velocity_y = jump_force;
         }
     }
