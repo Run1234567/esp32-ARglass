@@ -34,4 +34,7 @@ extern int music_total_time;
 extern int music_current_time;
 extern char music_current_song[64];
 
+extern lv_obj_t * ui_game_list_screen;
+extern lv_obj_t * ui_game_screen;
+
 #endif

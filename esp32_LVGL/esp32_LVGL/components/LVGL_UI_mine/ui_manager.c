@@ -16,6 +16,11 @@
 #include "ui_music_screen.h" // music player
 #include "my_uart.h" // ✨ 引入串口，用于获取列表
 
+extern void ui_game_screen_init(void);
+extern void game_screen_handle_cmd(ui_cmd_t cmd);
+extern void ui_game_list_screen_init(void);
+extern void game_list_screen_handle_cmd(ui_cmd_t cmd);
+
 static const char *TAG = "UI_MANAGER";
 
 // 实例化队列和当前状态
@@ -41,6 +46,8 @@ void switch_to_screen(ui_screen_state_t target_screen) {
         case SCREEN_NOISE:   target_obj = ui_noise_screen; break;
         case SCREEN_PITCH:   target_obj = ui_pitch_screen; break;
         case SCREEN_MUSIC:   target_obj = ui_music_screen; break;
+        case SCREEN_GAME_LIST: target_obj = ui_game_list_screen; break;
+        case SCREEN_GAME:    target_obj = ui_game_screen; break;
         default: return;
     }
 
@@ -119,6 +126,7 @@ static void process_ui_command(ui_cmd_t cmd) {
                 if (selected_idx == 9) switch_to_screen(SCREEN_NOISE); // 选中第10项进噪声监测
                 // 1 是健康，6 是 AI 对话 (预留)
                 if (selected_idx == 10) switch_to_screen(SCREEN_NOVEL); // 进系统设置/小说
+                if (selected_idx == 11) switch_to_screen(SCREEN_GAME_LIST); // 进游戏中心
             }
             break;
 
@@ -161,6 +169,14 @@ static void process_ui_command(ui_cmd_t cmd) {
             music_screen_handle_cmd(cmd);
             break;
 
+        case SCREEN_GAME_LIST:
+            game_list_screen_handle_cmd(cmd);
+            break;
+
+        case SCREEN_GAME:
+            game_screen_handle_cmd(cmd);
+            break;
+
         default:
             break;
     }
@@ -201,6 +217,8 @@ void ui_manager_init(void) {
         ui_noise_screen_init(); // noise meter
         ui_pitch_screen_init(); // pitch detector
         ui_music_screen_init(); // music player
+        ui_game_list_screen_init(); // game list
+        ui_game_screen_init(); // game
         
         // 初始显示主屏幕
         lv_scr_load(ui_main_screen);
