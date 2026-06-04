@@ -37,7 +37,7 @@ static void record_timer_cb(lv_timer_t * timer) {
 // ==========================================
 // ? 核心手势路由
 // ==========================================
-void record_screen_handle_cmd(uint8_t cmd) {
+void record_screen_handle_cmd(ui_cmd_t cmd) {
     
     if (cmd == UI_CMD_RIGHT) {
         if (!is_recording) {

@@ -1,8 +1,8 @@
-#include "ui_globals.h"
+﻿#include "ui_globals.h"
 #include "esp_lvgl_port.h"
 #include "ui_manager.h"
 
-#define GAME_ITEM_COUNT 2
+#define GAME_ITEM_COUNT 3
 
 lv_obj_t * ui_game_list_screen;
 static lv_obj_t * game_roller;
@@ -21,8 +21,8 @@ void ui_game_list_screen_init(void) {
     // 游戏列表滚轮
     game_roller = lv_roller_create(ui_game_list_screen);
     lv_roller_set_options(game_roller,
-                        "🏃 赛博跑酷\n"
-                        "👾 敬请期待...",
+                        "赛博跑酷\n"
+                        "经典 2048",
                         LV_ROLLER_MODE_NORMAL);
 
     lv_roller_set_visible_row_count(game_roller, 2);
@@ -54,9 +54,12 @@ void game_list_screen_handle_cmd(ui_cmd_t cmd) {
     }
     else if (cmd == UI_CMD_RIGHT) {
         uint16_t selected_idx = lv_roller_get_selected(game_roller);
+        extern void switch_to_screen(ui_screen_state_t target);
         if (selected_idx == 0) {
-            extern void switch_to_screen(ui_screen_state_t target);
             switch_to_screen(SCREEN_GAME);
+        }
+        else if (selected_idx == 1) {
+            switch_to_screen(SCREEN_GAME_2048);
         }
     }
 }

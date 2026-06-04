@@ -1,42 +1,35 @@
-#ifndef _UI_MANAGER_H
-#define _UI_MANAGER_H
+﻿#ifndef UI_MANAGER_H
+#define UI_MANAGER_H
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
+#include "ui_globals.h"
+#include "lvgl.h"
 
-// 1. ?????????????????? (?????? AI ?????)
+// ==========================================
+//   J.A.R.V.I.S. AR眼镜系统全功能屏幕状态机声明
+// ==========================================
 typedef enum {
-    UI_CMD_NONE = 0,
-    UI_CMD_UP,      // ???
-    UI_CMD_DOWN,    // ???
-    UI_CMD_LEFT,    // ?? (?????????????/???)
-    UI_CMD_RIGHT    // ??? (????????????/????)
-} ui_cmd_t;
-
-// 2. ???????????????????
-typedef enum {
-    SCREEN_MAIN_AR, // AR ������ (ʱ��/����/����)
-    SCREEN_MENU,    // ���˵� (����)
-    SCREEN_NOVEL,   // С˵�Ķ���
-    SCREEN_CLOCK,   // ✨ 新增：时钟屏幕状态
-    SCREEN_RECORD,  // ✨ 新增：录音界面
-    SCREEN_PLAYLIST, // ✨ 新增：播放列表界面
-    SCREEN_CAMERA,  // ✨ 新增：相机界面
-    SCREEN_NOISE,   // noise meter
-    SCREEN_PITCH,   // pitch detector
-    SCREEN_MUSIC,    // music player
-    SCREEN_GAME_LIST, // game list
-    SCREEN_GAME,     // game
-    SCREEN_AI_CHAT  // AI 对话 (预留给你未来的功能)
+    SCREEN_MAIN_AR,     // 1. AR主视界 / 待机表盘
+    SCREEN_MENU,        // 2. 滚动图标式主菜单
+    SCREEN_CLOCK,       // 3. 翻页时钟/秒表小工具
+    SCREEN_RECORD,      // 4. 录音机界面
+    SCREEN_PLAYLIST,    // 5. 录音回放列表界面
+    SCREEN_CAMERA,      // 6. 目标追踪/全息相机界面
+    SCREEN_MUSIC,       // 7. 骨传导音乐播放器控制
+    SCREEN_PITCH,       // 8. IMU姿态仪/魔法棒校准
+    SCREEN_NOISE,       // 9. 白噪音深度睡眠专注模式
+    SCREEN_NOVEL,       // 10. AI小说/AI智能对话交互
+    SCREEN_GAME_LIST,   // 11. 游戏中心子菜单列表
+    SCREEN_GAME,        // 12. 赛博跑酷
+    SCREEN_GAME_2048    // 13. 经典体感 2048
 } ui_screen_state_t;
 
-// 3. ??????????????????????????? (my_ble.c) ???????? (main.c)
-extern QueueHandle_t ui_cmd_queue;
-
-// 4. ????? UI ????????????????
+// 外部引擎函数声明
+void switch_to_screen(ui_screen_state_t target_screen);
 void ui_manager_init(void);
 
-// ? ?????????????????????????? ui_clock_screen.c ?????
-void switch_to_screen(ui_screen_state_t target_screen);
+// 命令队列 (供 BLE/UART 等模块发送指令)
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+extern QueueHandle_t ui_cmd_queue;
 
-#endif // _UI_MANAGER_H
+#endif // UI_MANAGER_H

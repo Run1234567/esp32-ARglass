@@ -9,7 +9,7 @@ static const char *TAG = "CAM";
 lv_obj_t * ui_camera_screen;
 static lv_obj_t * label_cam_status;
 
-void camera_screen_handle_cmd(uint8_t cmd) {
+void camera_screen_handle_cmd(ui_cmd_t cmd) {
     if (cmd == UI_CMD_RIGHT) {
         my_uart_send("CMD:TAKE_PHOTO\r\n");
         lv_label_set_text(label_cam_status, "#FFFF00 正在保存至 SD 卡...#");

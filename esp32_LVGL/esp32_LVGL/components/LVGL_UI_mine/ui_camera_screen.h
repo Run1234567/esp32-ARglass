@@ -7,6 +7,6 @@
 extern lv_obj_t * ui_camera_screen;
 
 void ui_camera_screen_init(void);
-void camera_screen_handle_cmd(uint8_t cmd);
+void camera_screen_handle_cmd(ui_cmd_t cmd);
 
 #endif

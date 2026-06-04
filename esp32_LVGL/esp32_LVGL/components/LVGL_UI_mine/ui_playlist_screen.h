@@ -7,7 +7,7 @@
 extern lv_obj_t * ui_playlist_screen;
 
 void ui_playlist_screen_init(void);
-void playlist_screen_handle_cmd(uint8_t cmd);
+void playlist_screen_handle_cmd(ui_cmd_t cmd);
 
 // 供串口调用的列表更新接口
 void playlist_clear(void);

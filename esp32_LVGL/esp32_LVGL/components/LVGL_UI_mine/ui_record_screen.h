@@ -9,6 +9,6 @@ extern lv_obj_t * ui_record_screen;
 void ui_record_screen_init(void);
 
 // ¼������ר��������·��
-void record_screen_handle_cmd(uint8_t cmd);
+void record_screen_handle_cmd(ui_cmd_t cmd);
 
 #endif // _UI_RECORD_SCREEN_H

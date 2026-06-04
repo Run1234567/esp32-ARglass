@@ -1,3 +1,4 @@
+#include "ui_globals.h"
 #include "ui_pitch_screen.h"
 #include "lvgl.h"
 #include "esp_lvgl_port.h"

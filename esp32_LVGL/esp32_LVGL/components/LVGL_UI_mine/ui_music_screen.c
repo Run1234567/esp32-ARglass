@@ -1,3 +1,4 @@
+#include "ui_globals.h"
 #include "ui_music_screen.h"
 #include "my_uart.h"
 #include "lvgl.h"
@@ -56,7 +57,7 @@ void music_clear_lrc(void) {
         lrc_count = 0;
 
         if(label_lrc_prev) lv_label_set_text(label_lrc_prev, "");
-        if(label_lrc_curr) lv_label_set_text(label_lrc_curr, "匹配歌词中...");
+        if(label_lrc_curr) lv_label_set_text(label_lrc_curr, "匹配歌词中..");
         if(label_lrc_next) lv_label_set_text(label_lrc_next, "");
 
         lvgl_port_unlock();
@@ -247,7 +248,7 @@ void ui_music_screen_init(void) {
     lv_obj_set_style_pad_all(obj_list_view, 0, 0);
 
     lv_obj_t * list_title = lv_label_create(obj_list_view);
-    lv_label_set_text(list_title, "本地音乐舱");
+    lv_label_set_text(list_title, "本地音乐列表");
     lv_obj_set_style_text_font(list_title, &my_font_cn_16, 0);
     lv_obj_set_style_text_color(list_title, lv_color_hex(0x00FFCC), 0);
     lv_obj_align(list_title, LV_ALIGN_TOP_MID, 0, 5);
@@ -305,7 +306,7 @@ void ui_music_screen_init(void) {
     lv_obj_align(label_lrc_next, LV_ALIGN_CENTER, 0, 15);
 
     lv_label_set_text(label_lrc_prev, "");
-    lv_label_set_text(label_lrc_curr, "准备中...");
+    lv_label_set_text(label_lrc_curr, "准备中..");
     lv_label_set_text(label_lrc_next, "");
 
     slider_progress = lv_slider_create(obj_player_view);

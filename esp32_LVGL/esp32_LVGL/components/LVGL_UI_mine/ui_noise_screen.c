@@ -1,3 +1,4 @@
+#include "ui_globals.h"
 #include "ui_noise_screen.h"
 #include "lvgl.h"
 #include "esp_lvgl_port.h"
@@ -7,12 +8,11 @@ lv_obj_t * ui_noise_screen;
 static lv_obj_t * meter_obj;
 static lv_meter_indicator_t * needle_indic;
 static lv_obj_t * label_db; 
-static lv_obj_t * label_status; // ? 新增：动态状态标签
-
+static lv_obj_t * label_status; // ? 新增：动态状态标�?
 void ui_noise_screen_init(void) {
     ui_noise_screen = lv_obj_create(NULL);
     
-    // ? 1. 豪华渐变背景 (深蓝灰 -> 纯黑)
+    // ? 1. 豪华渐变背景 (深蓝�?-> 纯黑)
     lv_obj_set_style_bg_color(ui_noise_screen, lv_color_hex(0x14141C), 0);
     lv_obj_set_style_bg_grad_color(ui_noise_screen, lv_color_hex(0x050508), 0);
     lv_obj_set_style_bg_grad_dir(ui_noise_screen, LV_GRAD_DIR_VER, 0);
@@ -20,7 +20,7 @@ void ui_noise_screen_init(void) {
 // ? 2. 顶部标题
     lv_obj_t * title = lv_label_create(ui_noise_screen);
     lv_label_set_text(title, "噪声监测"); // ? 改成中文
-    // ? 极其关键：必须把这个标签的字体切换成你的中文字体！
+    // ? 极其关键：必须把这个标签的字体切换成你的中文字体
     lv_obj_set_style_text_font(title, &my_font_cn_16, 0); 
     lv_obj_set_style_text_color(title, lv_color_hex(0xFF973B), 0); // 低调的高级灰
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 5);
@@ -37,14 +37,14 @@ void ui_noise_screen_init(void) {
     lv_meter_scale_t * scale = lv_meter_add_scale(meter_obj);
     // 细分刻度 (暗灰色，密集)
     lv_meter_set_scale_ticks(meter_obj, scale, 46, 2, 8, lv_color_hex(0x555566));
-    // 主刻度 (亮白色，稍长，带数字)
+    // 主刻�?(亮白色，稍长，带数字)
     lv_meter_set_scale_major_ticks(meter_obj, scale, 9, 3, 14, lv_color_white(), 15);
-    // 量程改为 30~120 (现实中安静环境也有 30+ dB，这样指针摆动更灵敏)
+    // 量程改为 30~120 (现实中安静环境也�?30+ dB，这样指针摆动更灵敏)
     lv_meter_set_scale_range(meter_obj, scale, 30, 120, 260, 140);
 
-    // ? 5. 超粗霓虹发光环
+    // ✅ 5. 超粗霓虹发光环
     int arc_w = 12; // 加粗的光环宽度
-    lv_meter_indicator_t * arc1 = lv_meter_add_arc(meter_obj, scale, arc_w, lv_color_hex(0x00FFCC), 0); // 荧光青
+    lv_meter_indicator_t * arc1 = lv_meter_add_arc(meter_obj, scale, arc_w, lv_color_hex(0x00FFCC), 0); // 荧光绿
     lv_meter_set_indicator_start_value(meter_obj, arc1, 30);
     lv_meter_set_indicator_end_value(meter_obj, arc1, 60);
 
@@ -68,7 +68,7 @@ void ui_noise_screen_init(void) {
     lv_obj_set_style_border_color(center_dot, lv_color_hex(0xFF3333), 0);
     lv_obj_set_style_border_width(center_dot, 2, 0);
 
-    // ? 7. 居中大数字 dB 标签
+    // ? 7. 居中大数�?dB 标签
     label_db = lv_label_create(ui_noise_screen);
     lv_obj_align(label_db, LV_ALIGN_CENTER, 0, 65); // 放在轴承正下方
     lv_obj_set_style_text_color(label_db, lv_color_white(), 0);
@@ -99,22 +99,22 @@ void update_noise_meter(int val) {
             lv_label_set_text(label_db, buf);
         }
 
-        // ✨ 互动灵魂：根据分贝值，字体颜色和状态提示动态改变！
+        // �?互动灵魂：根据分贝值，字体颜色和状态提示动态改变！
         if (label_status != NULL && label_db != NULL) {
             if (val < 60) {
                 // 安全环境：青色
                 lv_obj_set_style_text_color(label_db, lv_color_hex(0x00FFCC), 0);
-                lv_label_set_text(label_status, "安全 (安静)"); // ✨ 改为中文
+                lv_label_set_text(label_status, "安全 (安静)"); // �?改为中文
                 lv_obj_set_style_text_color(label_status, lv_color_hex(0x00FFCC), 0);
             } else if (val < 85) {
                 // 中等噪音：黄色
                 lv_obj_set_style_text_color(label_db, lv_color_hex(0xFFCC00), 0);
-                lv_label_set_text(label_status, "中等噪音"); // ✨ 改为中文
+                lv_label_set_text(label_status, "中等噪音"); // �?改为中文
                 lv_obj_set_style_text_color(label_status, lv_color_hex(0xFFCC00), 0);
             } else {
                 // 危险噪音：红色
                 lv_obj_set_style_text_color(label_db, lv_color_hex(0xFF3333), 0);
-                lv_label_set_text(label_status, "危险 (嘈杂)"); // ✨ 改为中文
+                lv_label_set_text(label_status, "危险 (嘈杂)"); // �?改为中文
                 lv_obj_set_style_text_color(label_status, lv_color_hex(0xFF3333), 0);
             }
         }

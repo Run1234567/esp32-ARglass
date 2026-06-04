@@ -84,7 +84,7 @@ void playlist_update_ui(void) {
     }
 }
 
-void playlist_screen_handle_cmd(uint8_t cmd) {
+void playlist_screen_handle_cmd(ui_cmd_t cmd) {
     if (cmd == UI_CMD_LEFT) {
         if (play_state != 0) {
             my_uart_send("CMD:STOP_MUSIC\r\n");
