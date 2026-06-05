@@ -29,6 +29,7 @@
 #include "ui_globals.h" // 引入全局变量枢纽
 #include "ui_novel_screen.h" // 引入小说屏幕的头文件，里面有初始化函数声明
 #include "ui_manager.h"
+#include "light_sensor.h"  // 光照传感器驱动（TEMT6000，GPIO 4）
 
 
 // ==========================================
@@ -211,6 +212,11 @@ void app_main(void) {
     }
     if (bmp280_init(I2C_MASTER_NUM) == ESP_OK) {
         ESP_LOGI(TAG, "BMP280 配置成功！");
+    }
+
+    // 8. 初始化光照传感器（TEMT6000，接在 GPIO 4）
+    if (light_sensor_init() == ESP_OK) {
+        ESP_LOGI(TAG, "光照传感器初始化完成！");
     }
 
     // 8. 初始化音频驱动

@@ -1,5 +1,19 @@
-# Name,   Type, SubType, Offset,  Size, Flags
-nvs,      data, nvs,     0x9000,  0x6000,
-phy_init, data, phy,     0xf000,  0x1000,
-factory,  app,  factory, 0x10000, 3M,
-model,    data, spiffs,  0x310000, 4M,
+# =====================================================================
+# Custom Flash Partition Table
+# =====================================================================
+# Flash total: 8MB (0x800000)
+#
+# Partition layout:
+#   Name      Type   SubType   Offset      Size      Usage
+#   -------   ----   ------   -------     -----     ----
+#   nvs       data   nvs      0x9000      24KB      NVS (WiFi config etc.)
+#   phy_init  data   phy      0xF000      4KB       WiFi PHY calibration
+#   factory   app    factory  0x10000     3MB       Application firmware
+#   model     data   spiffs   0x310000    4MB       AI models (WakeNet9)
+# =====================================================================
+
+# Name,     Type, SubType, Offset,    Size,    Flags
+nvs,        data, nvs,     0x9000,    0x6000,
+phy_init,   data, phy,     0xf000,    0x1000,
+factory,    app,  factory, 0x10000,   3M,
+model,      data, spiffs,  0x310000,  4M,
