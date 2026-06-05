@@ -39,7 +39,8 @@ typedef enum {
     SCREEN_GAME,         // 12. 赛博跑酷
     SCREEN_GAME_2048,    // 13. 经典体感 2048
     SCREEN_GAME_FLAPPY,  // 14. 像素鸟
-    SCREEN_GAME_NOTE     // 15. 声控八分音符酱
+    SCREEN_GAME_NOTE,    // 15. 声控八分音符酱
+    SCREEN_LIGHT         // 16. 光照传感器界面
 } ui_screen_state_t;
 
 // ============================================================

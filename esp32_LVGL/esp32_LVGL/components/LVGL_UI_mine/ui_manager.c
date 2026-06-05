@@ -35,6 +35,7 @@
 #include "ui_noise_screen.h"   // 噪声监测 / 白噪音
 #include "ui_pitch_screen.h"   // 音高检测
 #include "ui_music_screen.h"   // 音乐播放器
+#include "ui_light_screen.h"   // 光照传感器界面
 #include "my_uart.h"           // UART 串口通信模块
 
 // ---- 游戏模块的外部函数声明 ----
@@ -91,6 +92,7 @@ void switch_to_screen(ui_screen_state_t target_screen) {
         case SCREEN_GAME_2048:   target_obj = ui_game_2048_screen; break;
         case SCREEN_GAME_FLAPPY: target_obj = ui_game_flappy_screen; break;
         case SCREEN_GAME_NOTE:   target_obj = ui_game_note_screen; break;
+        case SCREEN_LIGHT:       target_obj = ui_light_screen;     break;
         default: return; // 未知屏幕枚举，直接返回
     }
 
@@ -182,6 +184,7 @@ static void process_ui_command(ui_cmd_t cmd) {
                 if (selected_idx == 9)  switch_to_screen(SCREEN_NOISE);
                 if (selected_idx == 10) switch_to_screen(SCREEN_NOVEL);
                 if (selected_idx == 11) switch_to_screen(SCREEN_GAME_LIST);
+                if (selected_idx == 12) switch_to_screen(SCREEN_LIGHT);
             }
             break;
 
@@ -240,6 +243,10 @@ static void process_ui_command(ui_cmd_t cmd) {
             game_note_screen_handle_cmd(cmd);
             break;
 
+        case SCREEN_LIGHT:
+            light_screen_handle_cmd(cmd);
+            break;
+
         default:
             break;
     }
@@ -296,6 +303,7 @@ void ui_manager_init(void) {
         ui_game_2048_init();         // 经典 2048
         ui_game_flappy_init();       // 像素鸟
         ui_game_note_init();         // 声控八分音符酱
+        ui_light_screen_init();      // 光照传感器界面
 
         // 加载主屏幕作为开机初始画面
         lv_scr_load(ui_main_screen);

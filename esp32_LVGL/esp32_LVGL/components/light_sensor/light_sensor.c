@@ -28,7 +28,7 @@ static const char *TAG = "LIGHT_SENSOR";
 #define LIGHT_ADC_BITWIDTH  ADC_BITWIDTH_12 // 12 位分辨率，输出 0~4095
 
 // 采集任务配置
-#define READ_TASK_PERIOD_MS 100             // 采样周期（毫秒）
+#define READ_TASK_PERIOD_MS 1000            // 采样周期（毫秒）
 #define READ_TASK_STACK     4096            // 任务栈大小（字节）
 #define READ_TASK_PRIORITY  3               // 任务优先级（低于 UI 的 5）
 #define SAMPLE_COUNT        16              // 每次采样的平均次数
