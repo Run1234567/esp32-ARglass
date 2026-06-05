@@ -74,8 +74,9 @@ static void light_sensor_read_task(void *pvParameter) {
         // ADC 值 → 电压 → Lux 换算
         // 12dB 衰减下满量程约 3.1V
         float voltage = avg_raw * 3.1f / 4095.0f;
-        // TEMT6000 简化线性换算：1V ≈ 10000 Lux（10KΩ 负载）
-        s_latest_lux = voltage * 10000.0f;
+        // TEMT6000 + 10KΩ 负载：约 1V ≈ 1000 Lux（数据手册典型值）
+        // 满量程 3.1V ≈ 3100 Lux
+        s_latest_lux = voltage * 1000.0f;
 
         // 每秒打印一次光照数据到串口监视器
         print_counter++;
