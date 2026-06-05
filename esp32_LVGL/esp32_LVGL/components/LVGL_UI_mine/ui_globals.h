@@ -22,8 +22,8 @@ LV_FONT_DECLARE(my_font_cn_16);
 // 2. ??????????? (????????????)
 extern lv_obj_t * ui_main_screen;
 extern lv_obj_t * ui_menu_screen;
-extern lv_obj_t * ui_clock_screen; // ? ������ʱ�ӹ�����Ļȫ�־��?
-extern lv_obj_t * ui_playlist_screen; // ? �����������б���Ļȫ�־��?
+extern lv_obj_t * ui_clock_screen; // ? ������ʱ�ӹ�����Ļȫ�־��?
+extern lv_obj_t * ui_playlist_screen; // ? �����������б���Ļȫ�־��?
 
 // 3. ????? MQTT ???????? UI ???????
 extern lv_obj_t * label_time;
@@ -49,5 +49,7 @@ extern char music_current_song[64];
 extern lv_obj_t * ui_game_list_screen;
 extern lv_obj_t * ui_game_2048_screen;
 extern lv_obj_t * ui_game_screen;
+extern lv_obj_t * ui_game_flappy_screen;
+extern lv_obj_t * ui_game_note_screen;
 
 #endif

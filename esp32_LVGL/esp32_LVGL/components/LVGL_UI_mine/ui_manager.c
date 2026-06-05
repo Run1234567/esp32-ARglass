@@ -22,6 +22,11 @@ extern void game_2048_screen_handle_cmd(ui_cmd_t cmd);
 extern void game_screen_handle_cmd(ui_cmd_t cmd);
 extern void ui_game_list_screen_init(void);
 extern void game_list_screen_handle_cmd(ui_cmd_t cmd);
+extern void ui_game_flappy_init(void);
+extern void game_flappy_screen_handle_cmd(ui_cmd_t cmd);
+extern void game_flappy_pause_timer(void);
+extern void ui_game_note_init(void);
+extern void game_note_screen_handle_cmd(ui_cmd_t cmd);
 
 static const char *TAG = "UI_MANAGER";
 
@@ -48,6 +53,8 @@ void switch_to_screen(ui_screen_state_t target_screen) {
         case SCREEN_GAME_LIST: target_obj = ui_game_list_screen; break;
         case SCREEN_GAME:    target_obj = ui_game_screen; break;
         case SCREEN_GAME_2048: target_obj = ui_game_2048_screen; break;
+        case SCREEN_GAME_FLAPPY: target_obj = ui_game_flappy_screen; break;
+        case SCREEN_GAME_NOTE: target_obj = ui_game_note_screen; break;
         default: return;
     }
 
@@ -63,7 +70,8 @@ void switch_to_screen(ui_screen_state_t target_screen) {
         my_uart_send("CMD:GET_BOOKS\r\n");
     }
 
-    if (current_screen == SCREEN_NOISE && target_screen != SCREEN_NOISE) {
+    if ((current_screen == SCREEN_NOISE || current_screen == SCREEN_GAME_NOTE) &&
+        (target_screen != SCREEN_NOISE && target_screen != SCREEN_GAME_NOTE)) {
         my_uart_send("CMD:NOISE_OFF\r\n");
     }
 
@@ -71,10 +79,14 @@ void switch_to_screen(ui_screen_state_t target_screen) {
         my_uart_send("CMD:PITCH_OFF\r\n");
     }
 
+    if (current_screen == SCREEN_GAME_FLAPPY && target_screen != SCREEN_GAME_FLAPPY) {
+        game_flappy_pause_timer();
+    }
+
     lv_scr_load_anim(target_obj, LV_SCR_LOAD_ANIM_NONE, 0, 0, false);
     current_screen = target_screen;
 
-    if (current_screen == SCREEN_NOISE) {
+    if (current_screen == SCREEN_NOISE || current_screen == SCREEN_GAME_NOTE) {
         my_uart_send("CMD:NOISE_ON\r\n");
     }
 
@@ -164,6 +176,14 @@ static void process_ui_command(ui_cmd_t cmd) {
             game_2048_screen_handle_cmd(cmd);
             break;
 
+        case SCREEN_GAME_FLAPPY:
+            game_flappy_screen_handle_cmd(cmd);
+            break;
+
+        case SCREEN_GAME_NOTE:
+            game_note_screen_handle_cmd(cmd);
+            break;
+
         default:
             break;
     }
@@ -199,7 +219,9 @@ void ui_manager_init(void) {
         ui_game_list_screen_init();
         ui_game_screen_init();
         ui_game_2048_init();
-        
+        ui_game_flappy_init();
+        ui_game_note_init();
+
         lv_scr_load(ui_main_screen);
         lvgl_port_unlock();
     }

@@ -141,6 +141,8 @@ static void uart_event_task(void *pvParameters) {
                         int db_value = atoi((char*)dtmp + 3);
                         extern void update_noise_meter(int val);
                         update_noise_meter(db_value);
+                        extern void game_note_pass_db(int val);
+                        game_note_pass_db(db_value);
                     }
                     else if (strncmp((char*)dtmp, "PH:", 3) == 0) {
                         float freq = atof((char*)dtmp + 3);

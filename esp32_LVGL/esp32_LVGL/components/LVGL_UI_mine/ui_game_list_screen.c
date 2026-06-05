@@ -2,7 +2,7 @@
 #include "esp_lvgl_port.h"
 #include "ui_manager.h"
 
-#define GAME_ITEM_COUNT 3
+#define GAME_ITEM_COUNT 4
 
 lv_obj_t * ui_game_list_screen;
 static lv_obj_t * game_roller;
@@ -22,7 +22,9 @@ void ui_game_list_screen_init(void) {
     game_roller = lv_roller_create(ui_game_list_screen);
     lv_roller_set_options(game_roller,
                         "赛博跑酷\n"
-                        "经典 2048",
+                        "经典 2048\n"
+                        "像素鸟\n"
+                        "八分音符酱",
                         LV_ROLLER_MODE_NORMAL);
 
     lv_roller_set_visible_row_count(game_roller, 2);
@@ -60,6 +62,12 @@ void game_list_screen_handle_cmd(ui_cmd_t cmd) {
         }
         else if (selected_idx == 1) {
             switch_to_screen(SCREEN_GAME_2048);
+        }
+        else if (selected_idx == 2) {
+            switch_to_screen(SCREEN_GAME_FLAPPY);
+        }
+        else if (selected_idx == 3) {
+            switch_to_screen(SCREEN_GAME_NOTE);
         }
     }
 }
