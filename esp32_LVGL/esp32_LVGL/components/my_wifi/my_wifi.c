@@ -55,7 +55,11 @@ void wifi_init_sta(void) {
 
     // 3. 配置并启动 Wi-Fi
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    esp_err_t wifi_err = esp_wifi_init(&cfg);
+    if (wifi_err != ESP_OK) {
+        ESP_LOGW("WIFI", "WiFi 初始化失败 (0x%x)，内存不足，跳过 WiFi", wifi_err);
+        return;
+    }
 
     esp_event_handler_instance_t instance_any_id;
     esp_event_handler_instance_t instance_got_ip;

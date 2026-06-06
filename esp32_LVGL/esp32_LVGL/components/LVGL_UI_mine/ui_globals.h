@@ -54,6 +54,7 @@ extern lv_obj_t * ui_game_2048_screen; // 经典体感 2048 游戏
 extern lv_obj_t * ui_game_screen;      // 赛博跑酷游戏
 extern lv_obj_t * ui_game_flappy_screen; // 像素鸟游戏
 extern lv_obj_t * ui_game_note_screen;   // 声控八分音符酱游戏
+extern lv_obj_t * ui_game_tetris_screen; // 俄罗斯方块
 extern lv_obj_t * ui_light_screen;       // 光照传感器界面
 
 // ============================================================

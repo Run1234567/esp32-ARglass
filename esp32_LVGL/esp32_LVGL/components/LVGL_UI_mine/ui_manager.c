@@ -36,6 +36,7 @@
 #include "ui_pitch_screen.h"   // 音高检测
 #include "ui_music_screen.h"   // 音乐播放器
 #include "ui_light_screen.h"   // 光照传感器界面
+#include "ui_game_tetris.h"    // 俄罗斯方块
 #include "my_uart.h"           // UART 串口通信模块
 
 // ---- 游戏模块的外部函数声明 ----
@@ -51,6 +52,7 @@ extern void game_flappy_screen_handle_cmd(ui_cmd_t cmd); // 像素鸟手势处�
 extern void game_flappy_pause_timer(void);        // 像素鸟定时器安全暂停
 extern void ui_game_note_init(void);              // 声控八分音符初始化
 extern void game_note_screen_handle_cmd(ui_cmd_t cmd); // 声控八分音符手势处理
+extern void game_tetris_pause_timer(void);        // 俄罗斯方块定时器暂停
 
 static const char *TAG = "UI_MANAGER"; // ESP_LOG 日志标签
 
@@ -92,6 +94,7 @@ void switch_to_screen(ui_screen_state_t target_screen) {
         case SCREEN_GAME_2048:   target_obj = ui_game_2048_screen; break;
         case SCREEN_GAME_FLAPPY: target_obj = ui_game_flappy_screen; break;
         case SCREEN_GAME_NOTE:   target_obj = ui_game_note_screen; break;
+        case SCREEN_GAME_TETRIS: target_obj = ui_game_tetris_screen; break;
         case SCREEN_LIGHT:       target_obj = ui_light_screen;     break;
         default: return; // 未知屏幕枚举，直接返回
     }
@@ -124,6 +127,9 @@ void switch_to_screen(ui_screen_state_t target_screen) {
     // 像素鸟游戏切出时：暂停物理引擎定时器，防止后台继续运算
     if (current_screen == SCREEN_GAME_FLAPPY && target_screen != SCREEN_GAME_FLAPPY) {
         game_flappy_pause_timer();
+    }
+    if (current_screen == SCREEN_GAME_TETRIS && target_screen != SCREEN_GAME_TETRIS) {
+        game_tetris_pause_timer();
     }
 
     // ---- 第四步：执行 LVGL 屏幕切换 ----
@@ -243,6 +249,10 @@ static void process_ui_command(ui_cmd_t cmd) {
             game_note_screen_handle_cmd(cmd);
             break;
 
+        case SCREEN_GAME_TETRIS:
+            game_tetris_screen_handle_cmd(cmd);
+            break;
+
         case SCREEN_LIGHT:
             light_screen_handle_cmd(cmd);
             break;
@@ -303,6 +313,7 @@ void ui_manager_init(void) {
         ui_game_2048_init();         // 经典 2048
         ui_game_flappy_init();       // 像素鸟
         ui_game_note_init();         // 声控八分音符酱
+        ui_game_tetris_init();       // 俄罗斯方块
         ui_light_screen_init();      // 光照传感器界面
 
         // 加载主屏幕作为开机初始画面
