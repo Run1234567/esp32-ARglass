@@ -239,36 +239,38 @@ void music_screen_handle_cmd(ui_cmd_t cmd) {
 
 void ui_music_screen_init(void) {
     ui_music_screen = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(ui_music_screen, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(ui_music_screen, lv_color_black(), 0);
 
+    // --- 列表视图 ---
     obj_list_view = lv_obj_create(ui_music_screen);
     lv_obj_set_size(obj_list_view, 240, 240);
-    lv_obj_set_style_bg_color(obj_list_view, lv_color_hex(0x101015), 0);
+    lv_obj_set_style_bg_color(obj_list_view, lv_color_black(), 0);
     lv_obj_set_style_border_width(obj_list_view, 0, 0);
     lv_obj_set_style_pad_all(obj_list_view, 0, 0);
 
     lv_obj_t * list_title = lv_label_create(obj_list_view);
-    lv_label_set_text(list_title, "本地音乐列表");
+    lv_label_set_text(list_title, "AUDIO LIBRARY");
     lv_obj_set_style_text_font(list_title, &my_font_cn_16, 0);
-    lv_obj_set_style_text_color(list_title, lv_color_hex(0x00FFCC), 0);
+    lv_obj_set_style_text_color(list_title, lv_color_white(), 0);
     lv_obj_align(list_title, LV_ALIGN_TOP_MID, 0, 5);
 
     roller_playlist = lv_roller_create(obj_list_view);
     lv_obj_set_style_text_font(roller_playlist, &my_font_cn_16, LV_PART_MAIN);
     lv_obj_set_style_text_font(roller_playlist, &my_font_cn_16, LV_PART_SELECTED);
-    lv_obj_set_style_bg_color(roller_playlist, lv_color_hex(0x101015), 0);
+    lv_obj_set_style_bg_color(roller_playlist, lv_color_black(), 0);
     lv_obj_set_style_border_width(roller_playlist, 0, 0);
-    lv_obj_set_style_text_color(roller_playlist, lv_color_hex(0x8888AA), 0);
-    lv_obj_set_style_text_color(roller_playlist, lv_color_hex(0x00FFCC), LV_PART_SELECTED);
-    lv_obj_set_style_bg_color(roller_playlist, lv_color_hex(0x222244), LV_PART_SELECTED);
-    lv_roller_set_options(roller_playlist, "正在加载歌单...", LV_ROLLER_MODE_NORMAL);
+    lv_obj_set_style_text_color(roller_playlist, lv_color_white(), 0);
+    lv_obj_set_style_text_color(roller_playlist, lv_color_hex(0x00FFFF), LV_PART_SELECTED);
+    lv_obj_set_style_bg_color(roller_playlist, lv_color_hex(0x222222), LV_PART_SELECTED);
+    lv_roller_set_options(roller_playlist, "Loading...", LV_ROLLER_MODE_NORMAL);
     lv_roller_set_visible_row_count(roller_playlist, 4);
     lv_obj_set_width(roller_playlist, 220);
     lv_obj_align(roller_playlist, LV_ALIGN_CENTER, 0, 10);
 
+    // --- 播放视图 ---
     obj_player_view = lv_obj_create(ui_music_screen);
     lv_obj_set_size(obj_player_view, 240, 240);
-    lv_obj_set_style_bg_color(obj_player_view, lv_color_hex(0x050508), 0);
+    lv_obj_set_style_bg_color(obj_player_view, lv_color_black(), 0);
     lv_obj_set_style_border_width(obj_player_view, 0, 0);
     lv_obj_set_style_pad_all(obj_player_view, 0, 0);
     lv_obj_add_flag(obj_player_view, LV_OBJ_FLAG_HIDDEN);
@@ -276,7 +278,7 @@ void ui_music_screen_init(void) {
     label_title = lv_label_create(obj_player_view);
     lv_label_set_text(label_title, music_current_song);
     lv_obj_set_style_text_font(label_title, &my_font_cn_16, 0);
-    lv_obj_set_style_text_color(label_title, lv_color_hex(0x00FFCC), 0);
+    lv_obj_set_style_text_color(label_title, lv_color_white(), 0);
     lv_obj_align(label_title, LV_ALIGN_TOP_MID, 0, 15);
     lv_label_set_long_mode(label_title, LV_LABEL_LONG_DOT);
     lv_obj_set_width(label_title, 220);
@@ -294,7 +296,7 @@ void ui_music_screen_init(void) {
     lv_label_set_long_mode(label_lrc_curr, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_set_style_text_align(label_lrc_curr, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(label_lrc_curr, &my_font_cn_16, 0);
-    lv_obj_set_style_text_color(label_lrc_curr, lv_color_hex(0x00FFCC), 0);
+    lv_obj_set_style_text_color(label_lrc_curr, lv_color_hex(0x00FFFF), 0);
     lv_obj_align(label_lrc_curr, LV_ALIGN_CENTER, 0, -10);
 
     label_lrc_next = lv_label_create(obj_player_view);
@@ -313,9 +315,9 @@ void ui_music_screen_init(void) {
     lv_obj_set_width(slider_progress, 200);
     lv_slider_set_range(slider_progress, 0, 100);
     lv_obj_align(slider_progress, LV_ALIGN_BOTTOM_MID, 0, -25);
-    lv_obj_set_style_bg_color(slider_progress, lv_color_hex(0x333344), 0);
-    lv_obj_set_style_bg_color(slider_progress, lv_color_hex(0x00FFCC), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(slider_progress, lv_color_hex(0x00FFCC), LV_PART_KNOB);
+    lv_obj_set_style_bg_color(slider_progress, lv_color_hex(0x333333), 0);
+    lv_obj_set_style_bg_color(slider_progress, lv_color_hex(0x00FFFF), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(slider_progress, lv_color_hex(0x00FFFF), LV_PART_KNOB);
     lv_obj_clear_flag(slider_progress, LV_OBJ_FLAG_CLICKABLE);
 
     label_time_info = lv_label_create(obj_player_view);
@@ -324,10 +326,11 @@ void ui_music_screen_init(void) {
     lv_obj_set_style_text_color(label_time_info, lv_color_hex(0x888888), 0);
     lv_obj_align(label_time_info, LV_ALIGN_BOTTOM_MID, 0, -45);
 
+    // --- 菜单遮罩（橙色系点缀）---
     obj_menu_overlay = lv_obj_create(ui_music_screen);
     lv_obj_set_size(obj_menu_overlay, 120, 240);
     lv_obj_align(obj_menu_overlay, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_set_style_bg_color(obj_menu_overlay, lv_color_hex(0x1A1A2E), 0);
+    lv_obj_set_style_bg_color(obj_menu_overlay, lv_color_hex(0x111111), 0);
     lv_obj_set_style_bg_opa(obj_menu_overlay, 230, 0);
     lv_obj_set_style_border_width(obj_menu_overlay, 0, 0);
     lv_obj_set_style_pad_all(obj_menu_overlay, 5, 0);
@@ -336,7 +339,7 @@ void ui_music_screen_init(void) {
     lv_obj_t * menu_label = lv_label_create(obj_menu_overlay);
     lv_label_set_text(menu_label, "控制");
     lv_obj_set_style_text_font(menu_label, &my_font_cn_16, 0);
-    lv_obj_set_style_text_color(menu_label, lv_color_hex(0x00FFCC), 0);
+    lv_obj_set_style_text_color(menu_label, lv_color_white(), 0);
     lv_obj_align(menu_label, LV_ALIGN_TOP_MID, 0, 10);
 
     btn_play_pause = lv_btn_create(obj_menu_overlay);
@@ -352,7 +355,7 @@ void ui_music_screen_init(void) {
     lv_obj_t * vol_lbl = lv_label_create(obj_menu_overlay);
     lv_label_set_text(vol_lbl, "音量");
     lv_obj_set_style_text_font(vol_lbl, &my_font_cn_16, 0);
-    lv_obj_set_style_text_color(vol_lbl, lv_color_hex(0x8888AA), 0);
+    lv_obj_set_style_text_color(vol_lbl, lv_color_hex(0x888888), 0);
     lv_obj_align(vol_lbl, LV_ALIGN_TOP_MID, 0, 110);
 
     slider_vol = lv_slider_create(obj_menu_overlay);
@@ -360,7 +363,7 @@ void ui_music_screen_init(void) {
     lv_slider_set_value(slider_vol, 80, LV_ANIM_OFF);
     lv_obj_set_width(slider_vol, 100);
     lv_obj_align(slider_vol, LV_ALIGN_TOP_MID, 0, 135);
-    lv_obj_set_style_bg_color(slider_vol, lv_color_hex(0x333344), 0);
+    lv_obj_set_style_bg_color(slider_vol, lv_color_hex(0x333333), 0);
     lv_obj_set_style_bg_color(slider_vol, lv_color_hex(0xFF973B), LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(slider_vol, lv_color_hex(0xFF973B), LV_PART_KNOB);
     lv_obj_clear_flag(slider_vol, LV_OBJ_FLAG_CLICKABLE);

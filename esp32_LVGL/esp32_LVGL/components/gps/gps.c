@@ -138,7 +138,6 @@ static void parse_nmea(const char *sentence) {
         if (!status || status[0] != 'A') {
             // 'V' = 无效定位
             s_gps_data.valid = false;
-            ESP_LOGW(TAG, "模块已连接，正在搜星中... (请移步室外)");
             return;
         }
 
@@ -184,12 +183,6 @@ static void parse_nmea(const char *sentence) {
         }
 
         s_gps_data.valid = true;
-
-        // 打印到串口监视器
-        ESP_LOGI(TAG, "LAT:%.6f LON:%.6f SPD:%.1fkm/h SAT:%d ALT:%.1fm TIME:%s DATE:%s",
-                 s_gps_data.latitude, s_gps_data.longitude,
-                 s_gps_data.speed_kmh, s_gps_data.satellites,
-                 s_gps_data.altitude, s_gps_data.utc_time, s_gps_data.utc_date);
     }
     // ---- 解析 $GPGGA（定位数据，含卫星数和海拔） ----
     else if (strncmp(sentence + 1, "GPGGA", 5) == 0 ||
@@ -222,15 +215,9 @@ static void gps_read_task(void *arg) {
     static char sentence[256];
     static int  sentence_len = 0;
 
-    ESP_LOGI(TAG, "GPS 解析任务已启动");
-
     while (1) {
         int len = uart_read_bytes(GPS_UART_NUM, buf, GPS_BUF_SIZE - 1,
                                   pdMS_TO_TICKS(100));
-        if (len > 0) {
-            buf[len] = '\0';
-            printf("GPS_RAW: %s\n", buf); // 原始数据，不经过解析直接打印
-        }
         if (len <= 0) continue;
 
         // 逐字符解析，提取完整的 NMEA 语句
@@ -249,7 +236,6 @@ static void gps_read_task(void *arg) {
                 if (c == '\n' || c == '\r') {
                     sentence[sentence_len] = '\0';
                     parse_nmea(sentence);
-                    ESP_LOGI(TAG, "NMEA: %s", sentence); // 原始数据
                     sentence_len = 0;
                 }
             }
@@ -308,8 +294,6 @@ esp_err_t gps_init(void) {
     );
 
     is_initialized = true;
-    ESP_LOGI(TAG, "GPS 初始化完成 (UART1, TX:%d RX:%d, %d baud)",
-             GPS_TX_PIN, GPS_RX_PIN, GPS_BAUD_RATE);
     return ESP_OK;
 }
 
