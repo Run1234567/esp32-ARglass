@@ -56,6 +56,7 @@ extern lv_obj_t * ui_game_flappy_screen; // 像素鸟游戏
 extern lv_obj_t * ui_game_note_screen;   // 声控八分音符酱游戏
 extern lv_obj_t * ui_game_tetris_screen; // 俄罗斯方块
 extern lv_obj_t * ui_light_screen;       // 光照传感器界面
+extern lv_obj_t * ui_health_screen;      // 心率血氧监测
 
 // ============================================================
 //   MQTT 数据 / 时钟模块共享变量

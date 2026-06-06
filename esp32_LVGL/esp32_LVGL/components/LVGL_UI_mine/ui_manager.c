@@ -37,6 +37,7 @@
 #include "ui_music_screen.h"   // 音乐播放器
 #include "ui_light_screen.h"   // 光照传感器界面
 #include "ui_game_tetris.h"    // 俄罗斯方块
+#include "ui_health_screen.h"  // 心率血氧监测
 #include "my_uart.h"           // UART 串口通信模块
 
 // ---- 游戏模块的外部函数声明 ----
@@ -96,6 +97,7 @@ void switch_to_screen(ui_screen_state_t target_screen) {
         case SCREEN_GAME_NOTE:   target_obj = ui_game_note_screen; break;
         case SCREEN_GAME_TETRIS: target_obj = ui_game_tetris_screen; break;
         case SCREEN_LIGHT:       target_obj = ui_light_screen;     break;
+        case SCREEN_HEALTH:      target_obj = ui_health_screen;    break;
         default: return; // 未知屏幕枚举，直接返回
     }
 
@@ -181,6 +183,7 @@ static void process_ui_command(ui_cmd_t cmd) {
                 // 根据滚轮选中项的索引，跳转到对应屏幕
                 uint16_t selected_idx = lv_roller_get_selected(menu_roller);
                 if (selected_idx == 0)  switch_to_screen(SCREEN_MAIN_AR);
+                if (selected_idx == 1)  switch_to_screen(SCREEN_HEALTH);
                 if (selected_idx == 2)  switch_to_screen(SCREEN_CLOCK);
                 if (selected_idx == 3)  switch_to_screen(SCREEN_RECORD);
                 if (selected_idx == 4)  switch_to_screen(SCREEN_PLAYLIST);
@@ -257,6 +260,10 @@ static void process_ui_command(ui_cmd_t cmd) {
             light_screen_handle_cmd(cmd);
             break;
 
+        case SCREEN_HEALTH:
+            health_screen_handle_cmd(cmd);
+            break;
+
         default:
             break;
     }
@@ -315,6 +322,7 @@ void ui_manager_init(void) {
         ui_game_note_init();         // 声控八分音符酱
         ui_game_tetris_init();       // 俄罗斯方块
         ui_light_screen_init();      // 光照传感器界面
+        ui_health_screen_init();     // 心率血氧监测
 
         // 加载主屏幕作为开机初始画面
         lv_scr_load(ui_main_screen);

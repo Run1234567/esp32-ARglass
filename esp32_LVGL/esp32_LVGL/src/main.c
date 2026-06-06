@@ -16,7 +16,6 @@
 
 
 #include "MPU6050.h"
-#include "MAX30105.h"
 #include "bmp280.h"
 #include "my_wifi.h"
 #include "audio_driver.h"
@@ -31,6 +30,7 @@
 #include "ui_manager.h"
 #include "light_sensor.h"  // 光照传感器驱动（TEMT6000，GPIO 4）
 #include "gps.h"           // GPS 模块驱动（ATGM336H，UART1）
+#include "max30102.h"      // MAX30102 心率血氧传感器
 
 
 // ==========================================
@@ -46,7 +46,7 @@ LV_FONT_DECLARE(my_font_cn_16);
 #define I2C_MASTER_SCL_IO           1
 #define I2C_MASTER_SDA_IO           2
 #define I2C_MASTER_NUM              I2C_NUM_0
-#define I2C_MASTER_FREQ_HZ          400000
+#define I2C_MASTER_FREQ_HZ          100000
 
 static const char *TAG = "MAIN";
 // ----------------------------------------------------
@@ -113,20 +113,6 @@ void time_sync_init(void) {
 
 
 
-void read_max30105_task(void *pvParameters) {
-    uint32_t red_val, ir_val;
-    
-    while (1) {
-        if (max30105_read_fifo(I2C_MASTER_NUM, &red_val, &ir_val) == ESP_OK) {
-            // 使用 printf 输出纯数据，格式为 "红光,红外光"
-            // 这种格式可以直接被 Arduino IDE 或其他串口绘图仪识别并画出两条折线
-            printf("%lu,%lu\n", red_val, ir_val);
-        }
-        
-        // 绝对延时 5ms (相当于 200Hz 的读取频率)
-        vTaskDelay(pdMS_TO_TICKS(5)); 
-    }
-}
 
 // ==========================================
 // ? WebSocket 事件回调：接收音频并播放
@@ -208,9 +194,6 @@ void app_main(void) {
     if (mpu6050_init_all() == ESP_OK) {
         ESP_LOGI(TAG, "MPU6050 唤醒成功！");
     }
-    if (max30105_init(I2C_MASTER_NUM) == ESP_OK) {
-        ESP_LOGI(TAG, "MAX30105 配置成功！");
-    }
     if (bmp280_init(I2C_MASTER_NUM) == ESP_OK) {
         ESP_LOGI(TAG, "BMP280 配置成功！");
     }
@@ -223,6 +206,12 @@ void app_main(void) {
     // 9. 初始化 GPS 模块（ATGM336H，UART1，GPIO 17/18）
     if (gps_init() == ESP_OK) {
         ESP_LOGI(TAG, "GPS 模块初始化完成！");
+    }
+
+    // 10. 初始化 MAX30102 心率血氧传感器（GPIO 1/2，I2C_NUM_1）
+    if (max30102_init() == ESP_OK) {
+        max30102_start_task();
+        ESP_LOGI(TAG, "MAX30102 初始化完成！");
     }
 
     // 8. 初始化音频驱动
@@ -244,7 +233,6 @@ void app_main(void) {
     // 10. 创建传感器读取任务
     // ?? 注意：前提是你已经在其他文件实现了 read_mpu6050_task，否则编译会报错找不到该函数
     xTaskCreate(read_mpu6050_task, "read_mpu6050_task", 4096, NULL, 5, NULL);
-    xTaskCreate(read_max30105_task, "read_max30105_task", 4096, NULL, 6, NULL);
     xTaskCreate(read_bmp280_task, "read_bmp280_task", 4096, NULL, 4, NULL);
     // 创建时间刷新任务 (分配 2KB 栈空间，优先级设低一点比如 2)
     xTaskCreate(ui_time_update_task, "ui_time_task", 1024 * 2, NULL, 2, NULL);
