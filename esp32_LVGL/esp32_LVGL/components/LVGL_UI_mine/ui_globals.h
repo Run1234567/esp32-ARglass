@@ -27,7 +27,8 @@ typedef enum {
     UI_CMD_DOWN,       // 向下挥动魔杖
     UI_CMD_LEFT,       // 向左挥动魔杖
     UI_CMD_RIGHT,      // 向右挥动魔杖
-    UI_CMD_CENTER      // 按下魔杖中心按钮
+    UI_CMD_CENTER,     // 按下魔杖中心按钮
+    UI_CMD_CIRCLE      // 画圈手势
 } ui_cmd_t;
 
 // ============================================================

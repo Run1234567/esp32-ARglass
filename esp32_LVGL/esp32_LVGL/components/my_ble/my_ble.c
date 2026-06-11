@@ -115,7 +115,7 @@ static int blecent_gap_event(struct ble_gap_event *event, void *arg) {
             blecent_scan();
             break;
         }
-        // --- 【修改 3】收到 Server 发来的通知 (Notify) 并在屏幕响应 ---
+        // --- 收到 Server 发来的通知 (Notify) 并在屏幕响应 ---
         case BLE_GAP_EVENT_NOTIFY_RX: {
             uint16_t len = OS_MBUF_PKTLEN(event->notify_rx.om);
             if (len > 0) {
@@ -123,33 +123,36 @@ static int blecent_gap_event(struct ble_gap_event *event, void *arg) {
                 uint8_t received_data[len + 1];
                 os_mbuf_copydata(event->notify_rx.om, 0, len, received_data);
                 received_data[len] = '\0';
-                
-                ESP_LOGI(TAG, "? 收到魔杖指令: %s", received_data);
-                
+
+                ESP_LOGI(TAG, "收到魔杖指令: %s", received_data);
+
                 ui_cmd_t cmd = UI_CMD_NONE;
 
                 // 根据收到的字符串，映射到 UI 指令并发送到队列
                 if (strstr((char*)received_data, "SwipeUp") != NULL) {
-                    ESP_LOGI(TAG, "? 执行: 菜单向上");
+                    ESP_LOGI(TAG, "执行: 菜单向上 / 旋转");
                     cmd = UI_CMD_UP;
-                } 
+                }
                 else if (strstr((char*)received_data, "SwipeDown") != NULL) {
-                    ESP_LOGI(TAG, "? 执行: 菜单向下");
+                    ESP_LOGI(TAG, "执行: 菜单向下 / 加速下落");
                     cmd = UI_CMD_DOWN;
                 }
                 else if (strstr((char*)received_data, "SwipeRight") != NULL) {
-                    ESP_LOGI(TAG, "? 执行: 确认/进入");
+                    ESP_LOGI(TAG, "执行: 确认 / 右移");
                     cmd = UI_CMD_RIGHT;
                 }
                 else if (strstr((char*)received_data, "SwipeLeft") != NULL) {
-                    ESP_LOGI(TAG, "? 执行: 返回/退出");
+                    ESP_LOGI(TAG, "执行: 返回 / 左移");
                     cmd = UI_CMD_LEFT;
+                }
+                else if (strstr((char*)received_data, "Circle") != NULL) {
+                    ESP_LOGI(TAG, "执行: 画圆 / 暂停游戏");
+                    cmd = UI_CMD_CIRCLE;
                 }
 
                 if (cmd != UI_CMD_NONE && ui_cmd_queue != NULL) {
                     xQueueSend(ui_cmd_queue, &cmd, 0); // 发送到 UI 队列
                 }
-
             }
             break;
         }
