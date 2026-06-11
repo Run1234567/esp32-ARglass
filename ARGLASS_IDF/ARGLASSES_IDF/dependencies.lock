@@ -1,6 +1,6 @@
 dependencies:
   espressif/dl_fft:
-    component_hash: 7dadbd644c0d7ba4733cc3726ec4cff6edf27b043725e1115861dec1609a3d28
+    component_hash: ced3cf28cc70452b7859c06f4e5059215167254a2047e34c893d6f501ccd6ea2
     dependencies:
     - name: idf
       require: private
@@ -8,7 +8,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com
       type: service
-    version: 0.3.1
+    version: 0.4.0
   espressif/esp-dsp:
     component_hash: 42dce32d46ac93dc11f60d368e29a830e9661c7345d794b8a45c343479cae636
     dependencies:
@@ -61,16 +61,6 @@ dependencies:
       registry_url: https://components.espressif.com
       type: service
     version: 1.3.1
-  espressif/esp_websocket_client:
-    component_hash: d8ccaffac2871dc756bdc08d7ff0bfa2daa7db3d94b0c7bf714b1962efe5e7c9
-    dependencies:
-    - name: idf
-      require: private
-      version: '>=5.0'
-    source:
-      registry_url: https://components.espressif.com/
-      type: service
-    version: 1.2.2
   idf:
     source:
       type: idf
@@ -78,7 +68,6 @@ dependencies:
 direct_dependencies:
 - espressif/esp-sr
 - espressif/esp32-camera
-- espressif/esp_websocket_client
-manifest_hash: 2bcb77a7331217a99e322a6e627f25c8aabf66849d2165107ab8519e1cd8264d
+manifest_hash: be966c23e0284c4ab4e60d5ff4fd74d6416ccb9b738c513c1613bb660533d9fb
 target: esp32s3
 version: 2.0.0

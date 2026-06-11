@@ -210,7 +210,6 @@ void app_main(void) {
 
     // 10. 初始化 MAX30102 心率血氧传感器（GPIO 1/2，I2C_NUM_1）
     if (max30102_init() == ESP_OK) {
-        max30102_start_task();
         ESP_LOGI(TAG, "MAX30102 初始化完成！");
     }
 

@@ -54,8 +54,8 @@
 #define PIN_CAM_PCLK   13
 
 #define TFT_SCK_PIN    20
-#define TFT_MOSI_PIN   21
-#define TFT_CS_PIN     19
+#define TFT_MOSI_PIN   19
+#define TFT_CS_PIN     5
 #define TFT_DC_PIN     47
 #define TFT_RST_PIN    14
 #define TFT_BLK_PIN    1

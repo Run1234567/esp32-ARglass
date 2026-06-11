@@ -109,10 +109,10 @@ void ble_host_task(void *param) {
 // ==========================================================
 typedef enum {
     STATE_CENTER,
-    STATE_UP,
-    STATE_DOWN,
-    STATE_LEFT,
-    STATE_RIGHT
+    STATE_UP,       // X减小
+    STATE_DOWN,     // X增大
+    STATE_LEFT,     // Y减小
+    STATE_RIGHT     // Y增大
 } JoystickState;
 
 void joystick_ble_task(void *pvParameters) {
@@ -152,13 +152,14 @@ void joystick_ble_task(void *pvParameters) {
 
         JoystickState new_state = STATE_CENTER;
 
-        if (raw_y < 1000) {
+        // X减小=上, X增大=下, Y减小=左, Y增大=右
+        if (raw_x < 1000) {
             new_state = STATE_UP;
-        } else if (raw_y > 3000) {
-            new_state = STATE_DOWN;
-        } else if (raw_x < 1000) {
-            new_state = STATE_LEFT;
         } else if (raw_x > 3000) {
+            new_state = STATE_DOWN;
+        } else if (raw_y < 1000) {
+            new_state = STATE_LEFT;
+        } else if (raw_y > 3000) {
             new_state = STATE_RIGHT;
         }
 

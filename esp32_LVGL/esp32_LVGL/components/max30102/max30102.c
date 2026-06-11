@@ -142,12 +142,45 @@ esp_err_t max30102_init(void) {
 }
 
 // ============================================================
-//   启动后台任务
+//   启动后台任务（进入健康界面时调用）
 // ============================================================
 esp_err_t max30102_start_task(void) {
     if (!is_initialized) return ESP_ERR_INVALID_STATE;
+    if (hr_task_handle != NULL) return ESP_OK; // 已在运行
+
+    // 重新配置传感器（防止之前被关闭）
+    max30102_write_reg(REG_MODE_CONFIG, 0x03);
+    max30102_write_reg(REG_LED1_PA, 0x50);
+    max30102_write_reg(REG_LED2_PA, 0x50);
+    max30102_write_reg(REG_SPO2_CONFIG, 0x27);
+    max30102_write_reg(0x04, 0x00);
+    max30102_write_reg(0x05, 0x00);
+    max30102_write_reg(0x06, 0x00);
+
+    // 重置数据
+    s_bpm = 0.0f;
+    s_spo2 = 0.0f;
+
     xTaskCreatePinnedToCore(heart_rate_task, "hr_task", HR_TASK_STACK,
                             NULL, HR_TASK_PRIO, &hr_task_handle, 0);
+    ESP_LOGI(TAG, "心率采集任务已启动");
+    return ESP_OK;
+}
+
+// ============================================================
+//   停止后台任务（退出健康界面时调用）
+// ============================================================
+esp_err_t max30102_stop_task(void) {
+    if (hr_task_handle != NULL) {
+        vTaskDelete(hr_task_handle);
+        hr_task_handle = NULL;
+    }
+    // 关闭 LED 节省功耗
+    max30102_write_reg(REG_LED1_PA, 0x00);
+    max30102_write_reg(REG_LED2_PA, 0x00);
+    s_bpm = 0.0f;
+    s_spo2 = 0.0f;
+    ESP_LOGI(TAG, "心率采集任务已停止");
     return ESP_OK;
 }
 

@@ -1,4 +1,2 @@
 dependencies:
-  espressif/esp_websocket_client: "1.2.2"
   espressif/esp-sr: "*"
-  

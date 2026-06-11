@@ -7,31 +7,28 @@
  * =====================================================================
  * 这是一个基于 ESP32-S3 的 AR 眼镜固件，代号 "J.A.R.V.I.S"。
  * 系统集成了以下核心功能：
- *   1. 麦克风音频采集与多路分发 (WebSocket/SD卡录音/音调检测/语音唤醒)
- *   2. WebSocket 实时双向音频通信 (连接远程服务器)
- *   3. 中文 TTS 语音合成 (边转边播)
- *   4. 小说/电子书阅读 (SD卡 TXT 文件)
- *   5. "Jarvis" 唤醒词检测 (ESP-SR WakeNet9)
- *   6. YIN 基频检测算法 (音调/音高识别)
- *   7. 分贝计算 (环境噪声监测)
- *   8. 通过 UART 与外部 UI MCU 通信 (1Mbaud)
+ *   1. 麦克风音频采集与多路分发 (SD卡录音/音调检测/语音唤醒)
+ *   2. 中文 TTS 语音合成 (边转边播)
+ *   3. 小说/电子书阅读 (SD卡 TXT 文件)
+ *   4. "Jarvis" 唤醒词检测 (ESP-SR WakeNet9)
+ *   5. YIN 基频检测算法 (音调/音高识别)
+ *   6. 分贝计算 (环境噪声监测)
+ *   7. 通过 UART 与外部 UI MCU 通信 (1Mbaud)
  *
  * 硬件平台：Seeed XIAO ESP32-S3 (双核 Xtensa LX7, 240MHz, 8MB Flash, OPI PSRAM)
  * 框架：ESP-IDF v5.5.0 + PlatformIO
  *
  * 数据流架构：
- *   PDM麦克风 --> audio_hub_task (Core 1) --+--> ws_ringbuf  --> audio_tx_task --> WebSocket服务器
- *                                            +--> sd_ringbuf  --> record_app --> SD卡 WAV录音
+ *   PDM麦克风 --> audio_hub_task (Core 1) --+--> sd_ringbuf  --> record_app --> SD卡 WAV录音
  *                                            +--> yin_ringbuf --> yin_pitch_task --> YIN音调检测
  *                                            +--> sr_ringbuf  --> voice_app --> WakeNet9唤醒引擎
  *
- *   WebSocket服务器 --> websocket_event_handler --> playSpeaker() --> I2S扬声器
  *   小说TXT文件 --> novel_read_task --> tts_app --> playSpeaker() --> I2S扬声器
  *   UI MCU <--UART1@1Mbaud--> my_uart (命令分发中枢)
  *
  * FreeRTOS 任务分配：
  *   Core 0: TTS合成任务、语音唤醒(feed/detect)
- *   Core 1: 音频采集Hub、WebSocket发送、小说读取、音乐播放、YIN测音
+ *   Core 1: 音频采集Hub、小说读取、音乐播放、YIN测音
  * =====================================================================
  */
 
@@ -51,7 +48,6 @@
 /* ==================== ESP-IDF 系统头文件 ==================== */
 #include "esp_log.h"             // 日志系统 (ESP_LOGI/ESP_LOGE/ESP_LOGW)
 #include "nvs_flash.h"           // 非易失性存储 (NVS)，WiFi 等模块需要
-#include "esp_websocket_client.h" // ESP-IDF 原生 WebSocket 客户端库
 #include "esp_camera.h"          // ESP32 摄像头驱动
 
 /* ==================== ESP-TTS 语音合成头文件 ==================== */
@@ -95,15 +91,13 @@ static const char *TAG = "J.A.R.V.I.S";  // 主程序日志前缀
  * 音频环形缓冲区 (Ring Buffer) - 音频数据多路分发核心
  * =====================================================================
  * 音频 Hub 任务从麦克风读取数据后，需要同时发送给多个消费者：
- *   1. ws_ringbuf  -> WebSocket 发送任务 (实时音频流)
- *   2. sd_ringbuf  -> SD 卡录音任务 (保存为 WAV 文件)
- *   3. yin_ringbuf -> YIN 音调检测任务 (基频分析)
- *   4. sr_ringbuf  -> 语音唤醒引擎 (WakeNet9 AFE)
+ *   1. sd_ringbuf  -> SD 卡录音任务 (保存为 WAV 文件)
+ *   2. yin_ringbuf -> YIN 音调检测任务 (基频分析)
+ *   3. sr_ringbuf  -> 语音唤醒引擎 (WakeNet9 AFE)
  *
  * 使用 RINGBUF_TYPE_NOSPLIT 类型，保证每次写入的数据块
  * 被完整读出，不会被分割到两次读取中
  */
-RingbufHandle_t ws_ringbuf = NULL;   // WebSocket 音频发送缓冲区
 RingbufHandle_t sd_ringbuf = NULL;   // SD 卡录音缓冲区
 RingbufHandle_t yin_ringbuf = NULL;  // YIN 音调检测缓冲区
 RingbufHandle_t sr_ringbuf = NULL;   // 语音唤醒引擎缓冲区
@@ -114,25 +108,10 @@ RingbufHandle_t sr_ringbuf = NULL;   // 语音唤醒引擎缓冲区
 volatile bool send_noise_data = false;  // 是否向 UI 发送分贝数据 (CMD:NOISE_ON/OFF)
 volatile bool send_pitch_data = false;  // 是否向 UI 发送音调数据 (CMD:PITCH_ON/OFF)
 
-/* =====================================================================
- * WebSocket 服务器配置
- * ===================================================================== */
-const char* websocket_url = "ws://124.220.224.189:8765/";
-/**
- * 协议说明：
- * - 二进制帧 (op_code=2): 上行=麦克风PCM音频/摄像头JPEG, 下行=服务器返回的PCM音频
- * - 文本帧 (op_code=1):   下行="CAPTURE" 命令触发拍照
- */
-
-/* =====================================================================
- * 全局状态与句柄
- * ===================================================================== */
-esp_websocket_client_handle_t ws_client;  // WebSocket 客户端句柄
-
 /**
  * @brief 扬声器互斥锁
  *
- * TTS 任务、音乐播放任务、WebSocket 音频下行 都需要使用扬声器
+ * TTS 任务、音乐播放任务 都需要使用扬声器
  * 通过互斥锁保证同一时刻只有一个任务在写 I2S 数据
  * 在 app_main() 中创建，各模块通过 extern 引用
  */
@@ -148,29 +127,6 @@ SemaphoreHandle_t speaker_mutex = NULL;
  *   3. novel_read_task 被唤醒，从 SD 卡读取下一段文本
  */
 SemaphoreHandle_t next_page_sem = NULL;
-
-/* =====================================================================
- * 函数：captureAndSend - 拍照并通过 WebSocket 即时发送
- * =====================================================================
- * @brief 从摄像头获取一帧 JPEG 图像，通过 WebSocket 二进制帧发送给服务器
- *
- * 调用时机：收到服务器发来的 "CAPTURE" 文本指令时
- * 流程：获取帧 -> WebSocket发送 -> 释放帧缓冲
- *
- * 注意：此函数在 WebSocket 事件回调中调用，不要做耗时操作
- */
-void captureAndSend(void) {
-    camera_fb_t * fb = esp_camera_fb_get();  // 从摄像头驱动获取一帧图像
-    if (fb) {
-        // 通过 WebSocket 发送二进制图片数据到服务器
-        // portMAX_DELAY 表示无限等待发送完成
-        esp_websocket_client_send_bin(ws_client, (const char *)fb->buf, fb->len, portMAX_DELAY);
-        ESP_LOGI(TAG, "📸 收到指令，照片已即时发送 (%zu bytes)", fb->len);
-        esp_camera_fb_return(fb);  // 重要：归还帧缓冲给摄像头驱动，否则内存泄漏
-    } else {
-        ESP_LOGE(TAG, "❌ 摄像头采集失败");
-    }
-}
 
 /* =====================================================================
  * 函数：calculate_decibel - 分贝计算 (环境噪声监测)
@@ -355,8 +311,7 @@ float calculate_pitch_yin(int16_t *buffer, size_t buffer_size, int sample_rate) 
  * 职责：
  *   1. 从 PDM 麦克风读取 512 采样点 (1024 字节) 的音频帧
  *   2. 计算分贝值 (如果 UI 开启了噪声监测，通过 UART 发送)
- *   3. 将音频数据分发到 4 个环形缓冲区：
- *      - ws_ringbuf:  WebSocket 实时音频流
+ *   3. 将音频数据分发到 3 个环形缓冲区：
  *      - sd_ringbuf:  SD 卡录音 (仅在录音状态时写入)
  *      - yin_ringbuf: YIN 音调检测 (仅在有声音且开启时写入)
  *      - sr_ringbuf:  语音唤醒引擎 (始终写入，溢出自动丢弃)
@@ -392,105 +347,24 @@ void audio_hub_task(void *pvParameters) {
                 }
             }
 
-            /* ---- 2. 发送给 WebSocket 服务器 ---- */
-            // 仅在 WebSocket 已连接时写入，超时 0 (不阻塞)
-            if (ws_ringbuf != NULL && esp_websocket_client_is_connected(ws_client)) {
-                xRingbufferSend(ws_ringbuf, audioBuffer, bytesRead, 0);
-            }
-
-            /* ---- 3. 发送给 SD 卡录音 ---- */
+            /* ---- 2. 发送给 SD 卡录音 ---- */
             // 仅在录音状态时写入 (is_recording 由 record_app 控制)
             extern volatile bool is_recording;
             if (sd_ringbuf != NULL && is_recording) {
                 xRingbufferSend(sd_ringbuf, audioBuffer, bytesRead, 0);
             }
 
-            /* ---- 4. 发送给 YIN 音调检测 ---- */
+            /* ---- 3. 发送给 YIN 音调检测 ---- */
             // 仅在有声音 (分贝>35) 且 UI 开启了音调检测时写入
             if (yin_ringbuf != NULL && db_value > 35.0f && send_pitch_data) {
                 xRingbufferSend(yin_ringbuf, audioBuffer, bytesRead, 0);
             }
 
-            /* ---- 5. 发送给语音唤醒引擎 ---- */
+            /* ---- 4. 发送给语音唤醒引擎 ---- */
             // 始终写入，超时 0：如果 AFE 处理不过来就自动丢弃，绝不阻塞 Hub
             if (sr_ringbuf != NULL) {
                 xRingbufferSend(sr_ringbuf, audioBuffer, bytesRead, 0);
             }
-        }
-    }
-}
-
-/* =====================================================================
- * WebSocket 事件回调函数
- * =====================================================================
- * @brief 处理 WebSocket 连接的各类事件
- *
- * 事件类型：
- *   - WEBSOCKET_EVENT_CONNECTED:    连接成功
- *   - WEBSOCKET_EVENT_DISCONNECTED: 连接断开 (底层会自动重连)
- *   - WEBSOCKET_EVENT_DATA:         收到数据
- *     - op_code == 1 (文本帧): 检查是否为 "CAPTURE" 拍照指令
- *     - op_code == 2 (二进制帧): 服务器返回的 PCM 音频，直接播放
- */
-static void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data) {
-    esp_websocket_event_data_t *data = (esp_websocket_event_data_t *)event_data;
-
-    switch (event_id) {
-        case WEBSOCKET_EVENT_CONNECTED:
-            ESP_LOGI(TAG, "🔗 已连接到基站");
-            break;
-
-        case WEBSOCKET_EVENT_DISCONNECTED:
-            ESP_LOGW(TAG, "🔌 连接断开，底层尝试重连中...");
-            break;
-
-        case WEBSOCKET_EVENT_DATA:
-            // op_code == 1 表示收到的是文本消息 (TEXT)
-            if (data->op_code == 1) {
-                // 判断是否是 CAPTURE 指令 (使用 strncmp 防止越界读取)
-                if (data->data_len >= 7 && strncmp((char *)data->data_ptr, "CAPTURE", 7) == 0) {
-                    ESP_LOGI(TAG, "📷 收到拍照请求...");
-                    captureAndSend();  // 立即拍照并发送
-                }
-            }
-            // op_code == 2 表示收到的是二进制流 (BIN)，即服务器发来的音频 PCM 数据
-            else if (data->op_code == 2) {
-                // 直接将 PCM 数据送入扬声器播放
-                playSpeaker((const uint8_t *)data->data_ptr, data->data_len);
-            }
-            break;
-    }
-}
-
-/* =====================================================================
- * WebSocket 音频发送任务
- * =====================================================================
- * @brief 从 ws_ringbuf 环形缓冲区读取音频数据，通过 WebSocket 发送给服务器
- *
- * 这个任务与 audio_hub_task 解耦：
- *   - Hub 任务只负责往环形缓冲区写数据 (不关心网络状态)
- *   - 此任务只负责从缓冲区读数据并发送 (不关心音频来源)
- *   - 如果 WebSocket 断开，此任务会休眠等待，不消耗 CPU
- *
- * 优先级: 4
- * 栈大小: 8192 字节
- * 核心绑定: Core 1
- */
-void audio_tx_task(void *pvParameters) {
-    size_t item_size;
-    while (1) {
-        if (esp_websocket_client_is_connected(ws_client)) {
-            // 从环形缓冲区提取数据，portMAX_DELAY = 没有数据就休眠等待
-            void *tx_data = xRingbufferReceive(ws_ringbuf, &item_size, portMAX_DELAY);
-            if (tx_data != NULL) {
-                // 通过 WebSocket 二进制帧发送给服务器
-                esp_websocket_client_send_bin(ws_client, (const char*)tx_data, item_size, portMAX_DELAY);
-                // 重要：用完必须归还内存给 RingBuffer，否则缓冲区会满
-                vRingbufferReturnItem(ws_ringbuf, tx_data);
-            }
-        } else {
-            // WebSocket 未连接时，休眠 100ms 后重试
-            vTaskDelay(pdMS_TO_TICKS(100));
         }
     }
 }
@@ -661,16 +535,13 @@ void yin_pitch_task(void *pvParameters) {
  *   2. NVS 初始化 (WiFi 等模块依赖)
  *   3. 创建扬声器互斥锁
  *   4. SD 卡初始化与读写测试
- *   5. 创建 4 个音频环形缓冲区
- *   6. WiFi 连接 (STA 模式)
- *   7. 等待 WiFi 获取 IP (5s)
- *   8. 初始化摄像头、麦克风、扬声器
- *   9. 初始化 TTS 引擎 (从 SD 卡加载模型)
- *  10. 启动 Jarvis 唤醒引擎
- *  11. 创建小说翻页信号量
- *  12. 配置并启动 WebSocket 客户端
- *  13. 初始化 UART 命令接口
- *  14. 创建 3 个 FreeRTOS 任务 (音频Hub/WS发送/小说读取)
+ *   5. 创建 3 个音频环形缓冲区
+ *   6. 初始化摄像头、麦克风、扬声器
+ *   7. 初始化 TTS 引擎 (从 SD 卡加载模型)
+ *   8. 启动 Jarvis 唤醒引擎
+ *   9. 创建小说翻页信号量
+ *  12. 初始化 UART 命令接口
+ *  13. 创建 2 个 FreeRTOS 任务 (音频Hub/小说读取)
  *  15. TTS 播报启动欢迎语
  *  16. 主线程进入空循环 (所有工作由子任务完成)
  */
@@ -689,7 +560,7 @@ void app_main(void) {
     ESP_ERROR_CHECK(ret);
 
     /* ---- 步骤2: 创建扬声器互斥锁 ---- */
-    // TTS、音乐播放、WebSocket 音频下行 都需要使用扬声器
+    // TTS、音乐播放 都需要使用扬声器
     // 互斥锁保证同一时刻只有一个任务在写 I2S 数据
     speaker_mutex = xSemaphoreCreateMutex();
 
@@ -699,6 +570,7 @@ void app_main(void) {
     }
 
     /* ---- 步骤3: 初始化 SD 卡 ---- */
+
     if (init_sd_card() == ESP_OK) {
         test_sd_card_read_write();  // 简单读写测试，验证 SD 卡工作正常
     } else {
@@ -708,66 +580,43 @@ void app_main(void) {
     /* ---- 步骤4: 创建音频环形缓冲区 ---- */
     // 每个缓冲区分配 10KB，足以缓冲数个音频帧 (512 samples * 2 bytes = 1024 bytes/帧)
     // RINGBUF_TYPE_NOSPLIT: 保证每次写入的数据被完整读出
-    ws_ringbuf  = xRingbufferCreate(10240, RINGBUF_TYPE_NOSPLIT);  // WebSocket
     sd_ringbuf  = xRingbufferCreate(10240, RINGBUF_TYPE_NOSPLIT);  // SD卡录音
     yin_ringbuf = xRingbufferCreate(8192,  RINGBUF_TYPE_NOSPLIT);  // YIN测音
     sr_ringbuf  = xRingbufferCreate(16384, RINGBUF_TYPE_NOSPLIT);  // 语音唤醒 (稍大，避免丢帧)
 
-    if (ws_ringbuf == NULL || sd_ringbuf == NULL) {
+    if (sd_ringbuf == NULL) {
         ESP_LOGE(TAG, "❌ 致命错误：音频环形缓冲区创建失败！");
         return;
     }
 
-    /* ---- 步骤5: 初始化网络 ---- */
-    wifi_init_sta();  // 启动 WiFi STA 模式，连接到配置的热点
-
-    ESP_LOGI(TAG, "⏳ 等待 WiFi 分配 IP...");
-    vTaskDelay(pdMS_TO_TICKS(5000));  // 等待 5 秒让 WiFi 完成连接
-
-    /* ---- 步骤6: 初始化三大硬件外设 ---- */
+    /* ---- 步骤5: 初始化硬件外设 ---- */
     initCamera();   // OV2640 并行摄像头 (JPEG/UXGA 模式)
     initAudio();    // PDM I2S 麦克风 (GPIO 41/42, 16kHz/16bit/单声道)
     initSpeaker();  // I2S 扬声器 (GPIO 1/2/3, 16kHz/16bit/单声道)
 
-    /* ---- 步骤7: 初始化软件引擎 ---- */
+    /* ---- 步骤6: 初始化软件引擎 ---- */
     init_tts_engine();      // TTS 语音合成引擎 (从 SD 卡加载模型到 PSRAM)
     start_jarvis_brain();   // "Jarvis" 唤醒词检测引擎 (WakeNet9 + AFE)
 
-    /* ---- 步骤8: 创建小说翻页信号量 ---- */
+    /* ---- 步骤7: 创建小说翻页信号量 ---- */
     next_page_sem = xSemaphoreCreateBinary();
     if (next_page_sem == NULL) {
         ESP_LOGE(TAG, "致命错误：信号量创建失败，内存不足！");
         return;
     }
 
-    /* ---- 步骤9: 配置并启动 WebSocket 客户端 ---- */
-    esp_websocket_client_config_t websocket_cfg = {
-        .uri = websocket_url,                   // 服务器地址
-        .reconnect_timeout_ms = 5000,           // 断线后 5 秒自动重连
-    };
-    ws_client = esp_websocket_client_init(&websocket_cfg);
-
-    // 注册事件回调：监听所有 WebSocket 事件
-    esp_websocket_register_events(ws_client, WEBSOCKET_EVENT_ANY, websocket_event_handler, (void *)ws_client);
-
-    // 启动 WebSocket 连接
-    esp_websocket_client_start(ws_client);
-
-    /* ---- 步骤10: 初始化 UART 命令接口 ---- */
+    /* ---- 步骤8: 初始化 UART 命令接口 ---- */
     // UART1 @ 1Mbaud，GPIO 4(TX)/5(RX)，用于与外部 UI MCU 通信
     my_uart_init();
 
-    /* ---- 步骤11: 创建 FreeRTOS 任务 ---- */
+    /* ---- 步骤9: 创建 FreeRTOS 任务 ---- */
     // 1. 麦克风核心采集任务 (音频 Hub)
     xTaskCreatePinnedToCore(audio_hub_task, "audio_hub", 8192, NULL, 5, NULL, 1);
 
-    // 2. WebSocket 音频发送任务
-    xTaskCreatePinnedToCore(audio_tx_task, "audio_tx", 8192, NULL, 4, NULL, 1);
-
-    // 3. 小说读取任务
+    // 2. 小说读取任务
     xTaskCreatePinnedToCore(novel_read_task, "novel_task", 4096 * 2, NULL, 4, NULL, 1);
 
-    /* ---- 步骤12: TTS 播报启动欢迎语 ---- */
+    /* ---- 步骤10: TTS 播报启动欢迎语 ---- */
     tts_speak("贾维斯系统已启动。主脑连接成功，正在等待指令。");
 
     /* ---- 主线程进入空循环 ---- */

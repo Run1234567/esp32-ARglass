@@ -9,7 +9,6 @@
 #   - audio_app:        麦克风音频采集
 #   - wifi_app:         WiFi STA 连接
 #   - speaker_app:      扬声器输出
-#   - esp_websocket_client: WebSocket 客户端 (托管组件)
 #   - my_uart:          UART 命令接口
 #   - record_app:       录音模块
 #   - tts_app:          TTS 语音合成
@@ -24,6 +23,6 @@ FILE(GLOB_RECURSE app_sources ${CMAKE_SOURCE_DIR}/src/*.c)
 idf_component_register(
     SRCS ${app_sources}                    # 源文件列表
     INCLUDE_DIRS "."                       # 头文件搜索路径 (当前目录)
-    PRIV_REQUIRES camera_app audio_app wifi_app speaker_app esp_websocket_client my_uart record_app tts_app music_app voice_app my_uart
+    PRIV_REQUIRES camera_app audio_app wifi_app speaker_app my_uart record_app tts_app music_app voice_app my_uart
     # PRIV_REQUIRES: 私有依赖，只在编译此组件时使用
 )

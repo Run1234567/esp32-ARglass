@@ -16,6 +16,9 @@ esp_err_t max30102_init(void);
 // 启动后台心率血氧采集任务
 esp_err_t max30102_start_task(void);
 
+// 停止后台任务（进入其他界面时调用，节省 CPU 和 I2C 带宽）
+esp_err_t max30102_stop_task(void);
+
 // 获取最新心率 (BPM)
 float max30102_get_bpm(void);
 

@@ -38,6 +38,7 @@
 #include "ui_light_screen.h"   // 光照传感器界面
 #include "ui_game_tetris.h"    // 俄罗斯方块
 #include "ui_health_screen.h"  // 心率血氧监测
+#include "max30102.h"          // MAX30102 心率传感器
 #include "my_uart.h"           // UART 串口通信模块
 
 // ---- 游戏模块的外部函数声明 ----
@@ -133,6 +134,9 @@ void switch_to_screen(ui_screen_state_t target_screen) {
     if (current_screen == SCREEN_GAME_TETRIS && target_screen != SCREEN_GAME_TETRIS) {
         game_tetris_pause_timer();
     }
+    if (current_screen == SCREEN_HEALTH && target_screen != SCREEN_HEALTH) {
+        max30102_stop_task(); // 退出健康界面，停止心率采集
+    }
 
     // ---- 第四步：执行 LVGL 屏幕切换 ----
     // LV_SCR_LOAD_ANIM_NONE 表示无动画、瞬间切换（适合 AR 眼镜的低延迟需求）
@@ -143,6 +147,9 @@ void switch_to_screen(ui_screen_state_t target_screen) {
     // 噪声监测 / 声控游戏切入时：开启麦克风采样
     if (current_screen == SCREEN_NOISE || current_screen == SCREEN_GAME_NOTE) {
         my_uart_send("CMD:NOISE_ON\r\n");
+    }
+    if (current_screen == SCREEN_HEALTH) {
+        max30102_start_task(); // 进入健康界面，启动心率采集
     }
     // 音高检测切入时：开启音频 FFT 分析
     if (current_screen == SCREEN_PITCH) {

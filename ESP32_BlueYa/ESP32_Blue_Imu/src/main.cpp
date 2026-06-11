@@ -30,7 +30,7 @@ static const char *TAG = "MAGIC_WAND";
 #define MPU6050_ADDR 0x68 
 
 #define WINDOW_SIZE 60        // 60 帧
-#define PRE_TRIGGER 15        // 触发前保留 10 帧
+#define PRE_TRIGGER 15        // 触发前保留 15 帧
 #define MOTION_THRESHOLD 8000 // 触发阈值
 
 static uint16_t notify_chr_val_handle;
@@ -43,7 +43,7 @@ int ring_ptr = 0;
 // AI 引擎变量
 constexpr int kTensorArenaSize = 100 * 1024;
 uint8_t tensor_arena[kTensorArenaSize];
-const tflite::Model* model = nullptr;  // <--- 就是漏了这一行致命声明！！！
+const tflite::Model* model = nullptr;  
 tflite::MicroInterpreter* interpreter = nullptr;
 TfLiteTensor* input = nullptr;
 TfLiteTensor* output = nullptr;
@@ -69,7 +69,7 @@ void mpu6050_init_native() {
     i2c_master_write_to_device(I2C_MASTER_NUM, MPU6050_ADDR, write_buf, 2, 100);
     write_buf[0] = 0x1B; write_buf[1] = 0x08; // ±500°/s
     i2c_master_write_to_device(I2C_MASTER_NUM, MPU6050_ADDR, write_buf, 2, 100);
-    ESP_LOGI(TAG, "✅ MPU6050 初始化完成");
+    ESP_LOGI(TAG, "✔ MPU6050 初始化完成");
 }
 
 // ==========================================================
@@ -164,7 +164,7 @@ void ai_init() {
     
     input = interpreter->input(0);
     output = interpreter->output(0);
-    ESP_LOGI(TAG, "🧠 AI 引擎加载完毕! 准备施法...");
+    ESP_LOGI(TAG, "🧙 AI 引擎加载完毕! 准备施法...");
 }
 
 // ==========================================================
@@ -216,31 +216,37 @@ void magic_wand_task(void *pvParameters) {
                     if (interpreter->Invoke() == kTfLiteOk) {
                         int64_t end_time = esp_timer_get_time();
                         
-                        float p_up    = output->data.f[0]; 
-                        float p_down  = output->data.f[1]; 
-                        float p_left  = output->data.f[2]; 
-                        float p_right = output->data.f[3]; 
-                        float p_none  = output->data.f[4]; 
+                        // ================= 修改核心：解析 6 个动作 =================
+                        float p_up     = output->data.f[0]; 
+                        float p_down   = output->data.f[1]; 
+                        float p_left   = output->data.f[2]; 
+                        float p_right  = output->data.f[3]; 
+                        float p_circle = output->data.f[4]; // 新增动作
+                        float p_none   = output->data.f[5]; // 移到第 6 位
                         
                         ESP_LOGI(TAG, "推理耗时: %lld us", (end_time - start_time));
-                        ESP_LOGI(TAG, "上:%.0f%% 下:%.0f%% 左:%.0f%% 右:%.0f%% 无:%.0f%%", 
-                                 p_up*100, p_down*100, p_left*100, p_right*100, p_none*100);
+                        ESP_LOGI(TAG, "上:%.0f%% 下:%.0f%% 左:%.0f%% 右:%.0f%% 圈:%.0f%% 无:%.0f%%", 
+                                 p_up*100, p_down*100, p_left*100, p_right*100, p_circle*100, p_none*100);
 
                         if (p_up > 0.8f) {
-                            ESP_LOGE(TAG, "✨✨ 施法: 上滑 (Swipe Up) !");
+                            ESP_LOGE(TAG, "✨🪄 施法: 上滑 (Swipe Up) !");
                             server_send_data("Action: SwipeUp");
                         } else if (p_down > 0.8f) {
-                            ESP_LOGE(TAG, "✨✨ 施法: 下滑 (Swipe Down) !");
+                            ESP_LOGE(TAG, "✨🪄 施法: 下滑 (Swipe Down) !");
                             server_send_data("Action: SwipeDown");
                         } else if (p_left > 0.8f) {
-                            ESP_LOGE(TAG, "✨✨ 施法: 左挥 (Swipe Left) !");
+                            ESP_LOGE(TAG, "✨🪄 施法: 左挥 (Swipe Left) !");
                             server_send_data("Action: SwipeLeft");
                         } else if (p_right > 0.8f) {
-                            ESP_LOGE(TAG, "✨✨ 施法: 右挥 (Swipe Right) !");
+                            ESP_LOGE(TAG, "✨🪄 施法: 右挥 (Swipe Right) !");
                             server_send_data("Action: SwipeRight");
+                        } else if (p_circle > 0.8f) { // 新增条件判断
+                            ESP_LOGE(TAG, "✨🪄 施法: 画圈 (Circle) !");
+                            server_send_data("Action: Circle");
                         } else {
-                            ESP_LOGI(TAG, "🤔 没看懂这是什么咒语...");
+                            ESP_LOGI(TAG, "🤷 没看懂这是什么咒语...");
                         }
+                        // ========================================================
                     }
                     triggered = false;
                     ESP_LOGI(TAG, "🛑 冷却中...");
