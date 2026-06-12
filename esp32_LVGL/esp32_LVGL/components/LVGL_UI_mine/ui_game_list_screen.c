@@ -26,7 +26,7 @@
  *   3 - 八分音符酱（音符类游戏）
  * 每当新增或删除游戏时，需要同步修改此宏定义以及下方滚轮选项字符串。
  */
-#define GAME_ITEM_COUNT 5
+#define GAME_ITEM_COUNT 9
 
 /* ========================================================================
  * 全局变量
@@ -142,7 +142,11 @@ void ui_game_list_screen_init(void) {
                         "经典 2048\n"
                         "像素鸟\n"
                         "八分音符酱\n"
-                        "俄罗斯方块",
+                        "俄罗斯方块\n"
+                        "打地鼠\n"
+                        "赛博贪吃蛇\n"
+                        "节奏魔杖\n"
+                        "记忆大师",
                         LV_ROLLER_MODE_NORMAL);
 
     /**
@@ -303,6 +307,18 @@ void game_list_screen_handle_cmd(ui_cmd_t cmd) {
         }
         else if (selected_idx == 4) {
             switch_to_screen(SCREEN_GAME_TETRIS);
+        }
+        else if (selected_idx == 5) {
+            switch_to_screen(SCREEN_GAME_MOLE);
+        }
+        else if (selected_idx == 6) {
+            switch_to_screen(SCREEN_GAME_SNAKE);
+        }
+        else if (selected_idx == 7) {
+            switch_to_screen(SCREEN_GAME_RHYTHM);
+        }
+        else if (selected_idx == 8) {
+            switch_to_screen(SCREEN_GAME_SIMON);
         }
     }
 }

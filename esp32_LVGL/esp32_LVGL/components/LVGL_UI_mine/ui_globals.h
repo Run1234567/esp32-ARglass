@@ -56,6 +56,10 @@ extern lv_obj_t * ui_game_screen;      // 赛博跑酷游戏
 extern lv_obj_t * ui_game_flappy_screen; // 像素鸟游戏
 extern lv_obj_t * ui_game_note_screen;   // 声控八分音符酱游戏
 extern lv_obj_t * ui_game_tetris_screen; // 俄罗斯方块
+extern lv_obj_t * ui_game_mole_screen;   // 打地鼠
+extern lv_obj_t * ui_game_snake_screen;  // 贪吃蛇
+extern lv_obj_t * ui_game_rhythm_screen; // 节奏魔杖
+extern lv_obj_t * ui_game_simon_screen;  // 记忆大师
 extern lv_obj_t * ui_light_screen;       // 光照传感器界面
 extern lv_obj_t * ui_health_screen;      // 心率血氧监测
 

@@ -41,8 +41,12 @@ typedef enum {
     SCREEN_GAME_FLAPPY,  // 14. 像素鸟
     SCREEN_GAME_NOTE,    // 15. 声控八分音符酱
     SCREEN_GAME_TETRIS,  // 16. 俄罗斯方块
-    SCREEN_LIGHT,        // 17. 光照传感器界面
-    SCREEN_HEALTH        // 18. 心率血氧监测
+    SCREEN_GAME_MOLE,    // 17. 打地鼠
+    SCREEN_GAME_SNAKE,   // 18. 贪吃蛇
+    SCREEN_GAME_RHYTHM,  // 19. 节奏魔杖
+    SCREEN_GAME_SIMON,   // 20. 记忆大师
+    SCREEN_LIGHT,        // 18. 光照传感器界面
+    SCREEN_HEALTH        // 19. 心率血氧监测
 } ui_screen_state_t;
 
 // ============================================================

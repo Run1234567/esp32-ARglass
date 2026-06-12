@@ -38,6 +38,10 @@
 #include "ui_light_screen.h"   // 光照传感器界面
 #include "ui_game_tetris.h"    // 俄罗斯方块
 #include "ui_health_screen.h"  // 心率血氧监测
+#include "ui_game_mole.h"      // 打地鼠
+#include "ui_game_snake.h"     // 贪吃蛇
+#include "ui_game_rhythm.h"    // 节奏魔杖
+#include "ui_game_simon.h"     // 记忆大师
 #include "max30102.h"          // MAX30102 心率传感器
 #include "my_uart.h"           // UART 串口通信模块
 
@@ -89,6 +93,10 @@ void switch_to_screen(ui_screen_state_t target_screen) {
         case SCREEN_GAME_FLAPPY: target_obj = ui_game_flappy_screen; break;
         case SCREEN_GAME_NOTE:   target_obj = ui_game_note_screen; break;
         case SCREEN_GAME_TETRIS: target_obj = ui_game_tetris_screen; break;
+        case SCREEN_GAME_MOLE:   target_obj = ui_game_mole_screen;  break;
+        case SCREEN_GAME_SNAKE:  target_obj = ui_game_snake_screen; break;
+        case SCREEN_GAME_RHYTHM: target_obj = ui_game_rhythm_screen; break;
+        case SCREEN_GAME_SIMON:  target_obj = ui_game_simon_screen;  break;
         case SCREEN_LIGHT:       target_obj = ui_light_screen;     break;
         case SCREEN_HEALTH:      target_obj = ui_health_screen;    break;
         default: return; 
@@ -112,6 +120,18 @@ void switch_to_screen(ui_screen_state_t target_screen) {
     }
     if (current_screen == SCREEN_GAME_TETRIS && target_screen != SCREEN_GAME_TETRIS) {
         game_tetris_pause_timer();
+    }
+    if (current_screen == SCREEN_GAME_MOLE && target_screen != SCREEN_GAME_MOLE) {
+        game_mole_pause_timer();
+    }
+    if (current_screen == SCREEN_GAME_SNAKE && target_screen != SCREEN_GAME_SNAKE) {
+        game_snake_pause_timer();
+    }
+    if (current_screen == SCREEN_GAME_RHYTHM && target_screen != SCREEN_GAME_RHYTHM) {
+        game_rhythm_pause_timer();
+    }
+    if (current_screen == SCREEN_GAME_SIMON && target_screen != SCREEN_GAME_SIMON) {
+        game_simon_pause_timer();
     }
     if (current_screen == SCREEN_HEALTH && target_screen != SCREEN_HEALTH) {
         max30102_stop_task(); 
@@ -247,6 +267,22 @@ static void process_ui_command(ui_cmd_t cmd) {
             game_tetris_screen_handle_cmd(cmd);
             break;
 
+        case SCREEN_GAME_MOLE:
+            game_mole_screen_handle_cmd(cmd);
+            break;
+
+        case SCREEN_GAME_SNAKE:
+            game_snake_screen_handle_cmd(cmd);
+            break;
+
+        case SCREEN_GAME_RHYTHM:
+            game_rhythm_screen_handle_cmd(cmd);
+            break;
+
+        case SCREEN_GAME_SIMON:
+            game_simon_screen_handle_cmd(cmd);
+            break;
+
         case SCREEN_LIGHT:
             light_screen_handle_cmd(cmd);
             break;
@@ -296,7 +332,11 @@ void ui_manager_init(void) {
         ui_game_2048_init();         
         ui_game_flappy_init();       
         ui_game_note_init();         
-        ui_game_tetris_init();       
+        ui_game_tetris_init();
+        ui_game_mole_init();
+        ui_game_snake_init();
+        ui_game_rhythm_init();
+        ui_game_simon_init();
         ui_light_screen_init();      
         ui_health_screen_init();     
 
