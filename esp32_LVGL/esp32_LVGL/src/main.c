@@ -18,7 +18,6 @@
 #include "MPU6050.h"
 #include "bmp280.h"
 #include "my_wifi.h"
-#include "audio_driver.h"
 #include "app_mqtt.h"
 #include "my_ble.h" // 引入我们刚才写的蓝牙模块头文件
 #include "my_uart.h" // ? 新增：串口通信模块
@@ -130,9 +129,7 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base, i
         case WEBSOCKET_EVENT_DATA:
             // op_code == 2 表示收到的是二进制流 (BIN)，即 Python 发来的 PCM 音频数据
             if (data->op_code == 2 && data->data_len > 0) {
-                // 核心魔法：将收到的网络音频块，直接塞给 I2S 驱动缓冲区！
-                // I2S 驱动内部配置了 portMAX_DELAY，如果底层播放没播完，这里会自动阻塞，完美控制网速不溢出
-                audio_driver_play(data->data_ptr, data->data_len);
+                // 音频驱动已移除，GPIO 5/6/7 已释放
             }
             break;
     }
@@ -213,12 +210,8 @@ void app_main(void) {
         ESP_LOGI(TAG, "MAX30102 初始化完成！");
     }
 
-    // 8. 初始化音频驱动
-    if (audio_driver_init() != ESP_OK) {
-        printf("? 音频模块初始化失败！请检查日志。\n");
-        return;
-    }
-    
+
+
     // 9. 配置并启动 WebSocket 客户端
     esp_websocket_client_config_t websocket_cfg = {
         .uri = websocket_url,
