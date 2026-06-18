@@ -172,7 +172,7 @@ static void process_ui_command(ui_cmd_t cmd) {
             }
             break;
 
-        // ---- 主菜单 ----
+        // ---- 主菜单（支持魔杖 + PAJ7620 手势） ----
         case SCREEN_MENU:
             if (cmd == UI_CMD_UP) {
                 menu_scroll_up();
@@ -183,8 +183,7 @@ static void process_ui_command(ui_cmd_t cmd) {
             else if (cmd == UI_CMD_LEFT) {
                 switch_to_screen(SCREEN_MAIN_AR);
             }
-            // 【修改点 2】：在菜单里懒得一层层退了？画个圈直接回主屏幕
-            else if (cmd == UI_CMD_CIRCLE) { 
+            else if (cmd == UI_CMD_CIRCLE) {
                 switch_to_screen(SCREEN_MAIN_AR);
             }
             else if (cmd == UI_CMD_RIGHT) {

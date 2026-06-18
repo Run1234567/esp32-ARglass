@@ -41,7 +41,7 @@ void ui_menu_screen_init(void) {
                         "🎵 本地音乐舱\n"
                         "🎵 音调检测\n"
                         "🔊 噪声监测\n"
-                        "⚙️ 系统设置\n"
+                        "📖 小说\n"
                         "🎮 游戏中心\n"
                         "☀️ 光照监测",
                         LV_ROLLER_MODE_INFINITE); // 无限循环模式，滚到底会自动接上开头

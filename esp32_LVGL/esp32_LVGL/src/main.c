@@ -4,6 +4,7 @@
 #include "esp_log.h"
 #include "tft_display.h"
 #include "driver/i2c.h"
+#include "driver/uart.h"
 #include "esp_websocket_client.h" // 引入 WebSocket 客户端
 #include "nvs_flash.h"
 // 引入 LVGL 核心与移植包
@@ -30,6 +31,7 @@
 #include "light_sensor.h"  // 光照传感器驱动（TEMT6000，GPIO 4）
 #include "gps.h"           // GPS 模块驱动（ATGM336H，UART1）
 #include "max30102.h"      // MAX30102 心率血氧传感器
+#include "paj7620.h"       // PAJ7620 手势识别传感器
 
 
 // ==========================================
@@ -135,6 +137,18 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base, i
     }
 }
 
+// UART0 接收任务（GPIO 13 读取外部芯片数据）
+static void uart0_rx_task(void *arg) {
+    uint8_t buf[128];
+    while (1) {
+        int len = uart_read_bytes(UART_NUM_0, buf, sizeof(buf) - 1, pdMS_TO_TICKS(100));
+        if (len > 0) {
+            buf[len] = '\0';
+            ESP_LOGI("UART0_RX", "收到 %d 字节: %s", len, (char*)buf);
+        }
+    }
+}
+
 void app_main(void) {
     // ? 1. 必须先初始化 NVS，否则 Wi-Fi 必崩溃！
     esp_err_t ret = nvs_flash_init();
@@ -172,6 +186,14 @@ void app_main(void) {
     // 启动你刚刚写好的串口模块
     my_uart_init();
 
+    // UART0 RX 重映射到 GPIO 13（日志走 USB Serial/JTAG，不占引脚）
+    uart_driver_install(UART_NUM_0, 1024, 0, 0, NULL, 0);
+    uart_set_pin(UART_NUM_0, UART_PIN_NO_CHANGE, 13, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    ESP_LOGI(TAG, "UART0 RX 已映射到 GPIO 13");
+
+    // 启动 UART0 接收任务（从 GPIO 13 读取外部芯片数据）
+    xTaskCreatePinnedToCore(uart0_rx_task, "uart0_rx", 4096, NULL, 3, NULL, 0);
+
     // ==========================================
     // ? 核心大换血：启动 UI 大管家
     // ==========================================
@@ -208,6 +230,12 @@ void app_main(void) {
     // 10. 初始化 MAX30102 心率血氧传感器（GPIO 1/2，I2C_NUM_1）
     if (max30102_init() == ESP_OK) {
         ESP_LOGI(TAG, "MAX30102 初始化完成！");
+    }
+
+    // 11. 初始化 PAJ7620 手势识别传感器（GPIO 38/39，I2C_NUM_1）
+    if (paj7620_init() == ESP_OK) {
+        paj7620_start_task();
+        ESP_LOGI(TAG, "PAJ7620 手势传感器初始化完成！");
     }
 
 
