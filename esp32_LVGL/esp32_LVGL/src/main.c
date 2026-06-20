@@ -252,8 +252,8 @@ void app_main(void) {
     time_sync_init(); // 启动时间同步，确保时间显示正确
     // 10. 创建传感器读取任务
     // ?? 注意：前提是你已经在其他文件实现了 read_mpu6050_task，否则编译会报错找不到该函数
-    xTaskCreate(read_mpu6050_task, "read_mpu6050_task", 4096, NULL, 5, NULL);
-    xTaskCreate(read_bmp280_task, "read_bmp280_task", 4096, NULL, 4, NULL);
+    xTaskCreate(read_mpu6050_task, "read_mpu6050_task", 2048, NULL, 5, NULL);
+    xTaskCreate(read_bmp280_task, "read_bmp280_task", 2048, NULL, 4, NULL);
     // 创建时间刷新任务 (分配 2KB 栈空间，优先级设低一点比如 2)
     xTaskCreate(ui_time_update_task, "ui_time_task", 1024 * 2, NULL, 2, NULL);
     // 11. 主循环挂起

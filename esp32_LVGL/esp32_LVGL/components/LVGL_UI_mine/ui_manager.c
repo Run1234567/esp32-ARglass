@@ -42,6 +42,7 @@
 #include "ui_game_snake.h"     // 贪吃蛇
 #include "ui_game_rhythm.h"    // 节奏魔杖
 #include "ui_game_simon.h"     // 记忆大师
+#include "ui_wifi_scan_screen.h" // Wi-Fi 扫描
 #include "max30102.h"          // MAX30102 心率传感器
 #include "my_uart.h"           // UART 串口通信模块
 
@@ -97,6 +98,7 @@ void switch_to_screen(ui_screen_state_t target_screen) {
         case SCREEN_GAME_SNAKE:  target_obj = ui_game_snake_screen; break;
         case SCREEN_GAME_RHYTHM: target_obj = ui_game_rhythm_screen; break;
         case SCREEN_GAME_SIMON:  target_obj = ui_game_simon_screen;  break;
+        case SCREEN_WIFI_SCAN:   target_obj = ui_wifi_scan_screen;  break;
         case SCREEN_LIGHT:       target_obj = ui_light_screen;     break;
         case SCREEN_HEALTH:      target_obj = ui_health_screen;    break;
         default: return; 
@@ -146,7 +148,10 @@ void switch_to_screen(ui_screen_state_t target_screen) {
         my_uart_send("CMD:NOISE_ON\r\n");
     }
     if (current_screen == SCREEN_HEALTH) {
-        max30102_start_task(); 
+        max30102_start_task();
+    }
+    if (current_screen == SCREEN_WIFI_SCAN) {
+        ui_wifi_scan_start();
     }
     if (current_screen == SCREEN_PITCH) {
         my_uart_send("CMD:PITCH_ON\r\n");
@@ -200,6 +205,7 @@ static void process_ui_command(ui_cmd_t cmd) {
                 if (selected_idx == 10) switch_to_screen(SCREEN_NOVEL);
                 if (selected_idx == 11) switch_to_screen(SCREEN_GAME_LIST);
                 if (selected_idx == 12) switch_to_screen(SCREEN_LIGHT);
+                if (selected_idx == 13) switch_to_screen(SCREEN_WIFI_SCAN);
             }
             break;
 
@@ -282,6 +288,10 @@ static void process_ui_command(ui_cmd_t cmd) {
             game_simon_screen_handle_cmd(cmd);
             break;
 
+        case SCREEN_WIFI_SCAN:
+            wifi_scan_screen_handle_cmd(cmd);
+            break;
+
         case SCREEN_LIGHT:
             light_screen_handle_cmd(cmd);
             break;
@@ -336,6 +346,7 @@ void ui_manager_init(void) {
         ui_game_snake_init();
         ui_game_rhythm_init();
         ui_game_simon_init();
+        ui_wifi_scan_screen_init();
         ui_light_screen_init();      
         ui_health_screen_init();     
 
