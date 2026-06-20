@@ -17,7 +17,7 @@ static const char *TAG = "PAJ7620";
 #define PAJ7620_SCL         38
 #define PAJ7620_SDA         39
 #define PAJ7620_I2C_PORT    I2C_NUM_1
-#define PAJ7620_I2C_FREQ    100000
+#define PAJ7620_I2C_FREQ    10000
 #define PAJ7620_ADDR        0x73
 #define PAJ7620_TIMEOUT     1000
 

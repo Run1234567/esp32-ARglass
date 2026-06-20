@@ -12,6 +12,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_heap_caps.h"
 
 static const char *TAG = "MAX30102";
 
@@ -161,8 +162,14 @@ esp_err_t max30102_start_task(void) {
     s_bpm = 0.0f;
     s_spo2 = 0.0f;
 
-    xTaskCreatePinnedToCore(heart_rate_task, "hr_task", HR_TASK_STACK,
-                            NULL, HR_TASK_PRIO, &hr_task_handle, 0);
+    // 栈放 PSRAM
+    StackType_t *hr_stack = heap_caps_malloc(HR_TASK_STACK, MALLOC_CAP_SPIRAM);
+    StaticTask_t *hr_tcb = heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (hr_stack && hr_tcb) {
+        hr_task_handle = xTaskCreateStaticPinnedToCore(heart_rate_task, "hr_task",
+                            HR_TASK_STACK/sizeof(StackType_t), NULL, HR_TASK_PRIO,
+                            hr_stack, hr_tcb, 0);
+    }
     ESP_LOGI(TAG, "心率采集任务已启动");
     return ESP_OK;
 }

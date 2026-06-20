@@ -5,6 +5,7 @@
 #include "tft_display.h"
 #include "driver/i2c.h"
 #include "driver/uart.h"
+#include "esp_heap_caps.h"
 #include "esp_websocket_client.h" // 引入 WebSocket 客户端
 #include "nvs_flash.h"
 // 引入 LVGL 核心与移植包
@@ -191,8 +192,12 @@ void app_main(void) {
     uart_set_pin(UART_NUM_0, UART_PIN_NO_CHANGE, 13, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
     ESP_LOGI(TAG, "UART0 RX 已映射到 GPIO 13");
 
-    // 启动 UART0 接收任务（从 GPIO 13 读取外部芯片数据）
-    xTaskCreatePinnedToCore(uart0_rx_task, "uart0_rx", 4096, NULL, 3, NULL, 0);
+    // 启动 UART0 接收任务（栈放 PSRAM）
+    StackType_t *uart0_stack = heap_caps_malloc(4096, MALLOC_CAP_SPIRAM);
+    StaticTask_t *uart0_tcb = heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (uart0_stack && uart0_tcb) {
+        xTaskCreateStaticPinnedToCore(uart0_rx_task, "uart0_rx", 4096/sizeof(StackType_t), NULL, 3, uart0_stack, uart0_tcb, 0);
+    }
 
     // ==========================================
     // ? 核心大换血：启动 UI 大管家
@@ -252,9 +257,16 @@ void app_main(void) {
     time_sync_init(); // 启动时间同步，确保时间显示正确
     // 10. 创建传感器读取任务
     // ?? 注意：前提是你已经在其他文件实现了 read_mpu6050_task，否则编译会报错找不到该函数
-    xTaskCreate(read_mpu6050_task, "read_mpu6050_task", 2048, NULL, 5, NULL);
-    xTaskCreate(read_bmp280_task, "read_bmp280_task", 2048, NULL, 4, NULL);
-    // 创建时间刷新任务 (分配 2KB 栈空间，优先级设低一点比如 2)
+    // 传感器任务栈放 PSRAM
+    StackType_t *mpu_stack = heap_caps_malloc(4096, MALLOC_CAP_SPIRAM);
+    StaticTask_t *mpu_tcb = heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (mpu_stack && mpu_tcb) xTaskCreateStatic(read_mpu6050_task, "mpu6050", 4096/sizeof(StackType_t), NULL, 5, mpu_stack, mpu_tcb);
+
+    StackType_t *bmp_stack = heap_caps_malloc(4096, MALLOC_CAP_SPIRAM);
+    StaticTask_t *bmp_tcb = heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (bmp_stack && bmp_tcb) xTaskCreateStatic(read_bmp280_task, "bmp280", 4096/sizeof(StackType_t), NULL, 4, bmp_stack, bmp_tcb);
+
+    // 时间刷新任务
     xTaskCreate(ui_time_update_task, "ui_time_task", 1024 * 2, NULL, 2, NULL);
     // 11. 主循环挂起
     while (1) {

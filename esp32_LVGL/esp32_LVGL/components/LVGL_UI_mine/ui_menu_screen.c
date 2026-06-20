@@ -1,7 +1,7 @@
 #include "ui_menu_screen.h"
 #include "ui_globals.h" // 引入全局变量枢纽
 // 菜单选项总数
-#define MENU_ITEM_COUNT 14
+#define MENU_ITEM_COUNT 15
 // =========================================================
 // ? 真正定义菜单界面的全局对象 (分配内存)
 // =========================================================
@@ -44,7 +44,8 @@ void ui_menu_screen_init(void) {
                         "📖 小说\n"
                         "🎮 游戏中心\n"
                         "☀️ 光照监测\n"
-                        "Wi-Fi 扫描",
+                        "Wi-Fi 扫描\n"
+                        "GPS 定位",
                         LV_ROLLER_MODE_INFINITE); // 无限循环模式，滚到底会自动接上开头
 
     // 4. 设置滚轮的排版与尺寸

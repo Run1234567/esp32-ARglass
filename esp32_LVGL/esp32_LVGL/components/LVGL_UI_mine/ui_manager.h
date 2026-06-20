@@ -46,7 +46,8 @@ typedef enum {
     SCREEN_GAME_RHYTHM,  // 19. 节奏魔杖
     SCREEN_GAME_SIMON,   // 20. 记忆大师
     SCREEN_WIFI_SCAN,    // 21. Wi-Fi 扫描
-    SCREEN_LIGHT,        // 22. 光照传感器界面
+    SCREEN_GPS,          // 22. GPS 定位
+    SCREEN_LIGHT,        // 23. 光照传感器界面
     SCREEN_HEALTH        // 19. 心率血氧监测
 } ui_screen_state_t;
 

@@ -10,6 +10,7 @@
 #include "esp_lvgl_port.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_heap_caps.h"
 
 static const char *TAG = "UI_WIFI_SCAN";
 
@@ -124,12 +125,16 @@ void ui_wifi_scan_start(void) {
         lvgl_port_unlock();
     }
 
-    BaseType_t ret = xTaskCreatePinnedToCore(wifi_scan_task, "wifi_scan", 3072, NULL, 5, NULL, tskNO_AFFINITY);
-
-    if (ret != pdPASS) {
-        ESP_LOGE(TAG, "扫描任务创建失败！内存不足");
+    // 栈放 PSRAM
+    StackType_t *wifi_stack = heap_caps_malloc(3072, MALLOC_CAP_SPIRAM);
+    StaticTask_t *wifi_tcb = heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (wifi_stack && wifi_tcb) {
+        xTaskCreateStaticPinnedToCore(wifi_scan_task, "wifi_scan", 3072/sizeof(StackType_t),
+                                      NULL, 5, wifi_stack, wifi_tcb, tskNO_AFFINITY);
+    } else {
+        ESP_LOGE(TAG, "PSRAM 分配失败");
         if (lvgl_port_lock(-1)) {
-            lv_label_set_text(label_scan_status, "系统内存不足");
+            lv_label_set_text(label_scan_status, "内存不足");
             lvgl_port_unlock();
         }
     }

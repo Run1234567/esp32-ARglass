@@ -66,6 +66,7 @@ extern lv_obj_t * ui_game_simon_screen;  // 记忆大师
 extern lv_obj_t * ui_light_screen;       // 光照传感器界面
 extern lv_obj_t * ui_health_screen;      // 心率血氧监测
 extern lv_obj_t * ui_wifi_scan_screen;   // Wi-Fi 扫描界面
+extern lv_obj_t * ui_gps_screen;         // GPS 定位界面
 
 // ============================================================
 //   MQTT 数据 / 时钟模块共享变量

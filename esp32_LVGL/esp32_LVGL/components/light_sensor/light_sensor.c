@@ -16,6 +16,7 @@
 #include "esp_adc/adc_oneshot.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_heap_caps.h"
 
 static const char *TAG = "LIGHT_SENSOR";
 
@@ -124,17 +125,15 @@ esp_err_t light_sensor_init(void) {
         return err;
     }
 
-    // ---- 第三步：启动后台采集任务 ----
-    // 绑定到核心 0（与 WiFi/BLE 同核，避免跨核竞争 ADC）
-    xTaskCreatePinnedToCore(
-        light_sensor_read_task,  // 任务函数
-        "light_read",            // 任务名称
-        READ_TASK_STACK,         // 栈大小
-        NULL,                    // 参数
-        READ_TASK_PRIORITY,      // 优先级
-        &read_task_handle,       // 任务句柄
-        0                        // 绑定到核心 0
-    );
+    // ---- 第三步：启动后台采集任务（栈放 PSRAM） ----
+    StackType_t *ls_stack = heap_caps_malloc(READ_TASK_STACK, MALLOC_CAP_SPIRAM);
+    StaticTask_t *ls_tcb = heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (ls_stack && ls_tcb) {
+        read_task_handle = xTaskCreateStaticPinnedToCore(
+            light_sensor_read_task, "light_read", READ_TASK_STACK/sizeof(StackType_t),
+            NULL, READ_TASK_PRIORITY, ls_stack, ls_tcb, 0
+        );
+    }
 
     is_initialized = true;
     ESP_LOGI(TAG, "光照传感器初始化完成 (GPIO 4 / ADC1_CH3)");
