@@ -44,6 +44,7 @@
 #include "ui_game_simon.h"     // 记忆大师
 #include "ui_wifi_scan_screen.h" // Wi-Fi 扫描
 #include "ui_gps_screen.h"       // GPS 定位
+#include "ui_ai_screen.h"       // AI 字幕
 #include "max30102.h"          // MAX30102 心率传感器
 #include "my_uart.h"           // UART 串口通信模块
 
@@ -101,6 +102,7 @@ void switch_to_screen(ui_screen_state_t target_screen) {
         case SCREEN_GAME_SIMON:  target_obj = ui_game_simon_screen;  break;
         case SCREEN_WIFI_SCAN:   target_obj = ui_wifi_scan_screen;  break;
         case SCREEN_GPS:         target_obj = ui_gps_screen;        break;
+        case SCREEN_AI_CHAT:     target_obj = ui_ai_screen;        break;
         case SCREEN_LIGHT:       target_obj = ui_light_screen;     break;
         case SCREEN_HEALTH:      target_obj = ui_health_screen;    break;
         default: return; 
@@ -207,6 +209,7 @@ static void process_ui_command(ui_cmd_t cmd) {
                 if (selected_idx == 3)  switch_to_screen(SCREEN_RECORD);
                 if (selected_idx == 4)  switch_to_screen(SCREEN_PLAYLIST);
                 if (selected_idx == 5)  switch_to_screen(SCREEN_CAMERA);
+                if (selected_idx == 6)  switch_to_screen(SCREEN_AI_CHAT);
                 if (selected_idx == 7)  switch_to_screen(SCREEN_MUSIC);
                 if (selected_idx == 8)  switch_to_screen(SCREEN_PITCH);
                 if (selected_idx == 9)  switch_to_screen(SCREEN_NOISE);
@@ -305,6 +308,10 @@ static void process_ui_command(ui_cmd_t cmd) {
             gps_screen_handle_cmd(cmd);
             break;
 
+        case SCREEN_AI_CHAT:
+            ai_screen_handle_cmd(cmd);
+            break;
+
         case SCREEN_LIGHT:
             light_screen_handle_cmd(cmd);
             break;
@@ -361,6 +368,7 @@ void ui_manager_init(void) {
         ui_game_simon_init();
         ui_wifi_scan_screen_init();
         ui_gps_screen_init();
+        ui_ai_screen_init();
         ui_light_screen_init();      
         ui_health_screen_init();     
 

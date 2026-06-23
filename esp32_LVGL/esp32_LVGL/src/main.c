@@ -138,6 +138,28 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base, i
     }
 }
 
+// 按键扫描任务（映射到 UI 手势指令）
+static void btn_scan_task(void *arg) {
+    const int btn_pins[] = {42, 41, 15, 16, 21};
+    const ui_cmd_t btn_cmds[] = {UI_CMD_UP, UI_CMD_DOWN, UI_CMD_LEFT, UI_CMD_RIGHT, UI_CMD_CIRCLE};
+    const char *btn_names[] = {"上", "下", "左", "右", "画圈"};
+    int last_state[5] = {1, 1, 1, 1, 1};
+
+    while (1) {
+        for (int i = 0; i < 5; i++) {
+            int state = gpio_get_level(btn_pins[i]);
+            if (state == 0 && last_state[i] == 1) {
+                ESP_LOGI("BTN", "按键: %s (GPIO %d)", btn_names[i], btn_pins[i]);
+                if (ui_cmd_queue != NULL) {
+                    xQueueSend(ui_cmd_queue, &btn_cmds[i], 0);
+                }
+            }
+            last_state[i] = state;
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+}
+
 // UART0 接收任务（GPIO 13 读取外部芯片数据）
 static void uart0_rx_task(void *arg) {
     uint8_t buf[128];
@@ -158,6 +180,24 @@ void app_main(void) {
       ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
+
+    // GPIO 5、6 设置为高电平（原音频引脚，现用于外部模块供电）
+    gpio_reset_pin(5);
+    gpio_reset_pin(6);
+    gpio_set_direction(5, GPIO_MODE_OUTPUT);
+    gpio_set_direction(6, GPIO_MODE_OUTPUT);
+    gpio_set_level(5, 1);
+    gpio_set_level(6, 1);
+
+    // 按键引脚初始化（输入 + 内部上拉，按下为低电平）
+    int btn_pins[] = {42, 41, 15, 16, 21};
+    for (int i = 0; i < 5; i++) {
+        gpio_reset_pin(btn_pins[i]);
+        gpio_set_direction(btn_pins[i], GPIO_MODE_INPUT);
+        gpio_set_pull_mode(btn_pins[i], GPIO_PULLUP_ONLY);
+    }
+    xTaskCreatePinnedToCore(btn_scan_task, "btn_scan", 4096, NULL, 3, NULL, 0);
+
     my_ble_init("My_Smart_JARVIS");
     ESP_LOGI(TAG, "1. 启动物理屏幕驱动...");
     lcd_init();

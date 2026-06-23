@@ -149,8 +149,8 @@ static void gesture_task(void *pvParameters) {
             // 优先处理 0x43 寄存器的 8 种基础方向手势
             if (reg0 != 0) {
                 switch (reg0) {
-                    case 0x01: cmd = UI_CMD_RIGHT;    ESP_LOGI(TAG, "→ 右"); break;
-                    case 0x02: cmd = UI_CMD_LEFT;     ESP_LOGI(TAG, "← 左"); break;
+                    case 0x01: cmd = UI_CMD_LEFT;     ESP_LOGI(TAG, "← 左"); break;
+                    case 0x02: cmd = UI_CMD_RIGHT;    ESP_LOGI(TAG, "→ 右"); break;
                     case 0x04: cmd = UI_CMD_DOWN;       ESP_LOGI(TAG, "↑ 上"); break;
                     case 0x08: cmd = UI_CMD_UP;     ESP_LOGI(TAG, "↓ 下"); break;
                     case 0x10: cmd = UI_CMD_FORWARD;  ESP_LOGI(TAG, "⊗ 向前靠近"); break;

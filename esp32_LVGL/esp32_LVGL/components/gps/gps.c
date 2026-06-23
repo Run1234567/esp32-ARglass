@@ -198,6 +198,7 @@ static void gps_read_task(void *arg) {
     static char sentence[256];
     static int  sentence_len = 0;
     int print_counter = 0;
+    int sentence_count = 0; // 已解析的 NMEA 语句计数
 
     while (1) {
         int len = uart_read_bytes(GPS_UART_NUM, buf, GPS_BUF_SIZE - 1,
@@ -217,22 +218,34 @@ static void gps_read_task(void *arg) {
                 if (c == '\n' || c == '\r') {
                     sentence[sentence_len] = '\0';
                     parse_nmea(sentence);
+                    sentence_count++;
+                    // 每 20 条打印一次原始 NMEA 内容
+                    if (sentence_count % 20 == 0) {
+                        ESP_LOGI(TAG, "NMEA #%d: %s", sentence_count, sentence);
+                    }
                     sentence_len = 0;
                 }
             }
         }
 
-        // 每 5 秒打印一次
+        // 每 5 秒打印一次详细状态
         print_counter++;
         if (print_counter >= 50) {
             print_counter = 0;
             if (s_gps_data.valid) {
-                ESP_LOGI(TAG, "LAT:%.6f LON:%.6f SPD:%.1fkm/h SAT:%d ALT:%.1fm %s",
-                         s_gps_data.latitude, s_gps_data.longitude,
-                         s_gps_data.speed_kmh, s_gps_data.satellites,
-                         s_gps_data.altitude, s_gps_data.utc_time);
+                ESP_LOGI(TAG, "=== GPS 已定位 ===");
+                ESP_LOGI(TAG, "  纬度: %.6f (%c)", fabs(s_gps_data.latitude), s_gps_data.latitude >= 0 ? 'N' : 'S');
+                ESP_LOGI(TAG, "  经度: %.6f (%c)", fabs(s_gps_data.longitude), s_gps_data.longitude >= 0 ? 'E' : 'W');
+                ESP_LOGI(TAG, "  海拔: %.1f m", s_gps_data.altitude);
+                ESP_LOGI(TAG, "  速度: %.1f km/h", s_gps_data.speed_kmh);
+                ESP_LOGI(TAG, "  卫星: %d 颗", s_gps_data.satellites);
+                ESP_LOGI(TAG, "  时间: %s", s_gps_data.utc_time);
+                ESP_LOGI(TAG, "  日期: %s", s_gps_data.utc_date);
             } else {
-                ESP_LOGW(TAG, "搜星中... (sat:%d)", s_gps_data.satellites);
+                ESP_LOGW(TAG, "=== 搜星中 ===");
+                ESP_LOGW(TAG, "  已捕获卫星: %d 颗", s_gps_data.satellites);
+                ESP_LOGW(TAG, "  本次读取: %d 字节", len);
+                ESP_LOGW(TAG, "  提示: 室外空旷处等待 1~3 分钟");
             }
         }
 

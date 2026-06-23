@@ -1,4 +1,5 @@
 #include "my_uart.h"
+#include "ui_manager.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -148,6 +149,20 @@ static void uart_event_task(void *pvParameters) {
                         float freq = atof((char*)dtmp + 3);
                         extern void update_pitch_ui(float freq);
                         update_pitch_ui(freq);
+                    }
+                    // AI 字幕霸屏：收到 SUB: 强制切换到 AI 屏幕
+                    else if (strncmp((char*)dtmp, "SUB:", 4) == 0) {
+                        char *ai_text = (char*)dtmp + 4;
+                        ai_text[strcspn(ai_text, "\r\n")] = '\0';
+
+                        extern void switch_to_screen(ui_screen_state_t target_screen);
+                        extern void ui_update_ai_text(const char *text);
+
+                        if (lvgl_port_lock(0)) {
+                            switch_to_screen(SCREEN_AI_CHAT);
+                            ui_update_ai_text(ai_text);
+                            lvgl_port_unlock();
+                        }
                     }
                     else if (strstr((char*)dtmp, "MU_CLEAR:1") != NULL) {
                         extern void music_clear_playlist(void);

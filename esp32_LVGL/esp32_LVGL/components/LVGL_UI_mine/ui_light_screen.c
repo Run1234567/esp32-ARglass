@@ -16,8 +16,10 @@ static void light_update_cb(lv_timer_t * timer) {
     if (lvgl_port_lock(0)) {
         float lux = light_sensor_get_lux();
 
-        // 更新中心数字
-        lv_label_set_text_fmt(lux_value_label, "%.1f", lux);
+        // 更新中心数字（用整数拼接，避免 LVGL 不支持 %f）
+        int lux_int = (int)lux;
+        int lux_dec = (int)(lux * 10) % 10;
+        lv_label_set_text_fmt(lux_value_label, "%d.%d", lux_int, lux_dec);
 
         // 更新环形仪表盘进�? (0~3000 Lux)
         int arc_val = (int)lux;
@@ -55,7 +57,7 @@ void ui_light_screen_init(void) {
     // 3. 中心数值文�?
     lux_value_label = lv_label_create(ui_light_screen);
     lv_obj_set_style_text_color(lux_value_label, lv_color_white(), 0);
-    lv_obj_set_style_text_font(lux_value_label, &my_font_cn_16, 0);
+    lv_obj_set_style_text_font(lux_value_label, &lv_font_montserrat_48, 0);
     lv_label_set_text(lux_value_label, "0.0");
     lv_obj_align(lux_value_label, LV_ALIGN_CENTER, 0, 10);
 
