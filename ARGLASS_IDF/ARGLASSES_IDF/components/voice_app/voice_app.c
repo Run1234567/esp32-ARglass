@@ -45,6 +45,8 @@
 #include "esp_wn_models.h"      // WakeNet 模型加载
 #include "esp_afe_sr_iface.h"   // AFE (Audio Front End) 接口
 #include "esp_afe_sr_models.h"  // AFE 模型配置
+#include "tts_app.h"            // TTS 语音合成 (tts_speak)
+#include "ai_chat.h"            // AI 语音对话模块
 
 // 注意：已彻底删除所有 esp_mn_xxx (MultiNet) 的头文件
 // MultiNet 用于语音命令识别，当前版本仅使用唤醒词检测
@@ -177,12 +179,14 @@ static void detect_task(void *arg) {
             ESP_LOGI(TAG, "=================================");
             ESP_LOGI(TAG, "🚀 [成功] 识别到唤醒词：贾维斯！");
             ESP_LOGI(TAG, "=================================");
+            tts_speak("贾维斯已就绪，请说出指令。");  // 播报提示语
 
-            // 💡 这里是未来扩展点：
-            // TODO 1: 播放一个提示音
-            // TODO 2: AR 屏幕显示"聆听中"动画
-            // TODO 3: 开始将后续语音通过 WebSocket 发送给服务器
-            // TODO 4: 接收并执行服务器返回的命令
+            /* 启动 AI 对话：OTA 发现 → WebSocket 连接 → 音频流传输 */
+            if (!ai_chat_is_active()) {
+                ai_chat_start();
+            } else {
+                ESP_LOGW(TAG, "AI 对话已在进行中，跳过重复启动");
+            }
         }
     }
 }

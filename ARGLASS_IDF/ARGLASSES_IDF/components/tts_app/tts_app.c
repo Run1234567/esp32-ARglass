@@ -279,7 +279,20 @@ void init_tts_engine() {
         /* ---- 步骤5: 启动合成任务 ---- */
         // 栈大小 32KB：TTS 合成需要大量栈空间，之前 8KB 会导致栈溢出
         // 绑定到 Core 0：与音频 Hub (Core 1) 分离
-        xTaskCreatePinnedToCore(tts_main_task, "tts_task", 32768, NULL, 5, NULL, 0);
+        /* 栈分配到 PSRAM，释放 32KB 内部 RAM */
+        static StackType_t *tts_stack = NULL;
+        static StaticTask_t tts_tcb;
+        if (!tts_stack) {
+            tts_stack = heap_caps_malloc(32768, MALLOC_CAP_SPIRAM);
+        }
+        if (tts_stack) {
+            xTaskCreateStaticPinnedToCore(tts_main_task, "tts_task", 32768,
+                NULL, 5, tts_stack, &tts_tcb, 0);
+            ESP_LOGI(TAG, "TTS 任务栈已分配到 PSRAM (32KB)");
+        } else {
+            xTaskCreatePinnedToCore(tts_main_task, "tts_task", 32768, NULL, 5, NULL, 0);
+            ESP_LOGW(TAG, "PSRAM 不足，TTS 任务栈使用内部 RAM");
+        }
     }
 }
 

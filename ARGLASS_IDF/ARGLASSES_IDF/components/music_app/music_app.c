@@ -38,6 +38,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include <stdio.h>
 #include <string.h>
 #include "speaker_app.h"  // 扬声器播放
@@ -205,8 +206,18 @@ void start_music_player(const char *path) {
     // 复制路径 (任务参数需要独立内存)
     char *path_copy = strdup(path);
 
-    // 创建播放任务，绑定到 Core 1
-    xTaskCreatePinnedToCore(play_wav_task, "wav_player", 4096, (void *)path_copy, 4, NULL, 1);
+    // 创建播放任务，绑定到 Core 1 (栈分配到 PSRAM)
+    static StackType_t *wav_stack = NULL;
+    static StaticTask_t wav_tcb;
+    if (!wav_stack) {
+        wav_stack = heap_caps_malloc(4096, MALLOC_CAP_SPIRAM);
+    }
+    if (wav_stack) {
+        xTaskCreateStaticPinnedToCore(play_wav_task, "wav_player", 4096,
+            (void *)path_copy, 4, wav_stack, &wav_tcb, 1);
+    } else {
+        xTaskCreatePinnedToCore(play_wav_task, "wav_player", 4096, (void *)path_copy, 4, NULL, 1);
+    }
 }
 
 /* =====================================================================

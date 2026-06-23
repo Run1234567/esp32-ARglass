@@ -60,6 +60,7 @@
 
 /* ==================== ESP-IDF 头文件 ==================== */
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "esp_camera.h"        // 摄像头驱动
 
 /* ==================== 项目组件头文件 ==================== */
@@ -246,7 +247,18 @@ esp_err_t start_record(void) {
 
     /* ---- 启动录音 ---- */
     is_recording = true;  // 设置标志，audio_hub_task 开始向 sd_ringbuf 写数据
-    xTaskCreate(record_task_worker, "rec_worker", 8192, NULL, 5, &record_task_handle);
+    /* 栈分配到 PSRAM */
+    static StackType_t *rec_stack = NULL;
+    static StaticTask_t rec_tcb;
+    if (!rec_stack) {
+        rec_stack = heap_caps_malloc(8192, MALLOC_CAP_SPIRAM);
+    }
+    if (rec_stack) {
+        record_task_handle = xTaskCreateStaticPinnedToCore(record_task_worker, "rec_worker", 8192,
+            NULL, 5, rec_stack, &rec_tcb, tskNO_AFFINITY);
+    } else {
+        xTaskCreate(record_task_worker, "rec_worker", 8192, NULL, 5, &record_task_handle);
+    }
 
     return ESP_OK;
 }

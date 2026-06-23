@@ -47,6 +47,7 @@
 
 /* ==================== ESP-IDF 系统头文件 ==================== */
 #include "esp_log.h"             // 日志系统 (ESP_LOGI/ESP_LOGE/ESP_LOGW)
+#include "esp_heap_caps.h"       // PSRAM 内存分配 (heap_caps_malloc)
 #include "nvs_flash.h"           // 非易失性存储 (NVS)，WiFi 等模块需要
 #include "esp_camera.h"          // ESP32 摄像头驱动
 
@@ -65,6 +66,7 @@
 #include "tts_app.h"       // TTS 语音合成模块 (异步队列式)
 #include "music_app.h"     // WAV 音乐播放器模块
 #include "voice_app.h"     // "Jarvis" 唤醒词检测模块 (ESP-SR WakeNet9)
+#include "ai_chat.h"       // AI 语音对话模块 (WebSocket + Opus)
 
 /* ==================== TTS 语音模型外部符号 ==================== */
 /**
@@ -101,6 +103,7 @@ static const char *TAG = "J.A.R.V.I.S";  // 主程序日志前缀
 RingbufHandle_t sd_ringbuf = NULL;   // SD 卡录音缓冲区
 RingbufHandle_t yin_ringbuf = NULL;  // YIN 音调检测缓冲区
 RingbufHandle_t sr_ringbuf = NULL;   // 语音唤醒引擎缓冲区
+RingbufHandle_t ai_ringbuf = NULL;   // AI 对话音频缓冲区 (Opus 编码)
 
 /* =====================================================================
  * UI 控制开关 (通过 UART 命令由外部 MCU 控制)
@@ -333,6 +336,11 @@ void audio_hub_task(void *pvParameters) {
         size_t bytesRead = readAudio(audioBuffer, samples);
 
         if (bytesRead > 0) {
+            static int hub_dbg = 0;
+            if (hub_dbg < 3) {
+                ESP_LOGI("HUB", "readAudio OK: %d bytes, loop #%d", bytesRead, hub_dbg);
+                hub_dbg++;
+            }
             /* ---- 1. 分贝计算 ---- */
             float db_value = calculate_decibel(audioBuffer, samples);
 
@@ -364,6 +372,22 @@ void audio_hub_task(void *pvParameters) {
             // 始终写入，超时 0：如果 AFE 处理不过来就自动丢弃，绝不阻塞 Hub
             if (sr_ringbuf != NULL) {
                 xRingbufferSend(sr_ringbuf, audioBuffer, bytesRead, 0);
+            }
+
+            /* ---- 5. 发送给 AI 对话模块 ---- */
+            if (ai_ringbuf != NULL) {
+                BaseType_t ret = xRingbufferSend(ai_ringbuf, audioBuffer, bytesRead, 0);
+                static int ai_dbg = 0;
+                if (ai_dbg < 3) {
+                    ESP_LOGI("HUB", "AI写入: ret=%d bytes=%d ringbuf=%p", ret, bytesRead, (void*)ai_ringbuf);
+                    ai_dbg++;
+                }
+            } else {
+                static int ai_null_dbg = 0;
+                if (ai_null_dbg < 1) {
+                    ESP_LOGE("HUB", "ai_ringbuf 是 NULL!");
+                    ai_null_dbg++;
+                }
             }
         }
     }
@@ -442,8 +466,18 @@ void start_yin_pitch_task(void) {
         while ((stale = xRingbufferReceive(yin_ringbuf, &dummy, 0)) != NULL) {
             vRingbufferReturnItem(yin_ringbuf, stale);
         }
-        // 创建任务，绑定到 Core 1
-        xTaskCreatePinnedToCore(yin_pitch_task, "yin_task", 8192, NULL, 3, &yin_task_handle, 1);
+        // 创建任务，绑定到 Core 1 (栈分配到 PSRAM)
+        static StackType_t *yin_stack = NULL;
+        static StaticTask_t yin_tcb;
+        if (!yin_stack) {
+            yin_stack = heap_caps_malloc(8192, MALLOC_CAP_SPIRAM);
+        }
+        if (yin_stack) {
+            yin_task_handle = xTaskCreateStaticPinnedToCore(yin_pitch_task, "yin_task", 8192,
+                NULL, 3, yin_stack, &yin_tcb, 1);
+        } else {
+            xTaskCreatePinnedToCore(yin_pitch_task, "yin_task", 8192, NULL, 3, &yin_task_handle, 1);
+        }
     }
 }
 
@@ -583,6 +617,7 @@ void app_main(void) {
     sd_ringbuf  = xRingbufferCreate(10240, RINGBUF_TYPE_NOSPLIT);  // SD卡录音
     yin_ringbuf = xRingbufferCreate(8192,  RINGBUF_TYPE_NOSPLIT);  // YIN测音
     sr_ringbuf  = xRingbufferCreate(16384, RINGBUF_TYPE_NOSPLIT);  // 语音唤醒 (稍大，避免丢帧)
+    ai_ringbuf  = xRingbufferCreate(16384, RINGBUF_TYPE_NOSPLIT);  // AI 对话 (Opus 编码)
 
     if (sd_ringbuf == NULL) {
         ESP_LOGE(TAG, "❌ 致命错误：音频环形缓冲区创建失败！");
@@ -597,6 +632,8 @@ void app_main(void) {
     /* ---- 步骤6: 初始化软件引擎 ---- */
     init_tts_engine();      // TTS 语音合成引擎 (从 SD 卡加载模型到 PSRAM)
     start_jarvis_brain();   // "Jarvis" 唤醒词检测引擎 (WakeNet9 + AFE)
+    wifi_init_sta();        // WiFi STA 连接 (AI 对话依赖网络)
+    ai_chat_init();         // AI 语音对话模块 (WebSocket + Opus)
 
     /* ---- 步骤7: 创建小说翻页信号量 ---- */
     next_page_sem = xSemaphoreCreateBinary();
@@ -613,8 +650,21 @@ void app_main(void) {
     // 1. 麦克风核心采集任务 (音频 Hub)
     xTaskCreatePinnedToCore(audio_hub_task, "audio_hub", 8192, NULL, 5, NULL, 1);
 
-    // 2. 小说读取任务
-    xTaskCreatePinnedToCore(novel_read_task, "novel_task", 4096 * 2, NULL, 4, NULL, 1);
+    // 2. 小说读取任务 (栈分配到 PSRAM)
+    {
+        static StackType_t *novel_stack = NULL;
+        static StaticTask_t novel_tcb;
+        if (!novel_stack) {
+            novel_stack = heap_caps_malloc(4096 * 2, MALLOC_CAP_SPIRAM);
+        }
+        if (novel_stack) {
+            xTaskCreateStaticPinnedToCore(novel_read_task, "novel_task", 4096 * 2,
+                NULL, 4, novel_stack, &novel_tcb, 1);
+            ESP_LOGI(TAG, "小说任务栈已分配到 PSRAM (8KB)");
+        } else {
+            xTaskCreatePinnedToCore(novel_read_task, "novel_task", 4096 * 2, NULL, 4, NULL, 1);
+        }
+    }
 
     /* ---- 步骤10: TTS 播报启动欢迎语 ---- */
     tts_speak("贾维斯系统已启动。主脑连接成功，正在等待指令。");
