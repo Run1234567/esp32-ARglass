@@ -1,5 +1,28 @@
 # Change log for esp-sr
 
+# 2.4.6
+- Remove redundant heap check
+
+# 2.4.5
+- Fix the coexistence bug of esp-dl and esp-sr on ESP32-S3.
+- Fix the crash issue of ESP32-P4 in IDF v5.5.1 and IDF v5.5.2.
+
+# 2.4.4
+- Support ESP32-S31
+- Fix some document bugs
+
+# 2.4.3
+- Add Full-Duplex AEC and AFE for esp32s3 and esp32p4
+
+# 2.4.2
+- Add more wake word models
+
+# 2.4.1
+- Experimental support esp-idf v6.0
+- Supports both esp32p4 eco6 and old versions.
+- Added a Kconfig option to load data from external path.
+- Print model loading report during compilation
+
 # 2.4.0
 - add more wakenet models
 - add an afe option to fix output channel

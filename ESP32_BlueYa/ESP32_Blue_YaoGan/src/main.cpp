@@ -15,6 +15,8 @@
 
 // --- ADC 单次采样库 (ESP-IDF v5) ---
 #include "esp_adc/adc_oneshot.h"
+// --- GPIO ---
+#include "driver/gpio.h"
 
 static const char *TAG = "CYBER_WAND";
 #define DEVICE_NAME "Cyberry_Wand"
@@ -133,10 +135,21 @@ void joystick_ble_task(void *pvParameters) {
     ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, ADC_CHANNEL_7, &config)); // GPIO 8 (X轴)
     ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, ADC_CHANNEL_8, &config)); // GPIO 9 (Y轴)
 
+    // 3. 初始化按键 GPIO 10 (按下接地，内部上拉)
+    gpio_config_t btn_config = {
+        .pin_bit_mask = (1ULL << GPIO_NUM_10),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&btn_config);
+
     int raw_x = 0;
     int raw_y = 0;
-    int log_counter = 0; 
+    int log_counter = 0;
     JoystickState current_state = STATE_CENTER;
+    bool btn_pressed = false;
 
     ESP_LOGI(TAG, "🎮 摇杆引擎启动 (ADC1 无冲突模式)，等待操作...");
 
@@ -152,15 +165,15 @@ void joystick_ble_task(void *pvParameters) {
 
         JoystickState new_state = STATE_CENTER;
 
-        // X减小=上, X增大=下, Y减小=左, Y增大=右
+        // X减小=上, X增大=下, Y减小=右, Y增大=左
         if (raw_x < 1000) {
             new_state = STATE_UP;
         } else if (raw_x > 3000) {
             new_state = STATE_DOWN;
         } else if (raw_y < 1000) {
-            new_state = STATE_LEFT;
-        } else if (raw_y > 3000) {
             new_state = STATE_RIGHT;
+        } else if (raw_y > 3000) {
+            new_state = STATE_LEFT;
         }
 
         if (new_state != current_state) {
@@ -181,6 +194,22 @@ void joystick_ble_task(void *pvParameters) {
                     ESP_LOGI(TAG, "发射 -> SwipeRight");
                 }
             }
+        }
+
+        // 按键检测 (GPIO 4，按下接地)
+        if (gpio_get_level(GPIO_NUM_10) == 0) {
+            if (!btn_pressed) {
+                btn_pressed = true;
+                ESP_LOGI(TAG, "🔘 按键触发 -> GPIO 10 变低电平");
+                if (current_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+                    server_send_data("Circle");
+                    ESP_LOGI(TAG, "   -> 📡 蓝牙已发送: Circle");
+                } else {
+                    ESP_LOGI(TAG, "   -> ⚠️ 蓝牙未连接，数据未发送");
+                }
+            }
+        } else {
+            btn_pressed = false;
         }
 
         vTaskDelay(pdMS_TO_TICKS(50));

@@ -3,6 +3,7 @@
 
 #include <time.h>
 #include "esp_lvgl_port.h"
+#include "lunar.h"
 
 
 
@@ -111,33 +112,41 @@ void ui_ar_glass_init(void) {
 // ⏱️ 时间与 UI 刷新守护任务
 // =========================================================
 void ui_time_update_task(void *pvParameters) {
+    static int last_mday = -1; // 记录上一次的日期，用于判断是否跨天
+
     while (1) {
         time_t now;
         struct tm timeinfo;
-        
-        // 获取当前系统时间
+
         time(&now);
         localtime_r(&now, &timeinfo);
 
-        // 判断时间是否已经同步成功 (年份大于 1970 代表同步成功)
         if (timeinfo.tm_year > (2020 - 1900)) {
             char time_str[16];
             char date_str[16];
-            
-            // 格式化时间为 "HH:MM" (例如 14:30)
+
             strftime(time_str, sizeof(time_str), "%H:%M", &timeinfo);
-            // 格式化日期为 "MM/DD" (例如 05/20)
             strftime(date_str, sizeof(date_str), "%m/%d", &timeinfo);
 
-            // ⚠️ 极其重要：操作 LVGL 必须加锁！
+            // 只在跨天或开机第一次时计算农历（节省 CPU）
+            if (timeinfo.tm_mday != last_mday) {
+                char lunar_str[32];
+                get_lunar_string(timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday, lunar_str);
+
+                if (lvgl_port_lock(0)) {
+                    lv_label_set_text(label_lunar, lunar_str);
+                    lvgl_port_unlock();
+                }
+                last_mday = timeinfo.tm_mday;
+            }
+
             if (lvgl_port_lock(0)) {
                 lv_label_set_text(label_time, time_str);
                 lv_label_set_text(label_date, date_str);
                 lvgl_port_unlock();
             }
         }
-        
-        // 每 1 秒钟刷新一次就够了，非常省电
+
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
