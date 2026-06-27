@@ -1,7 +1,10 @@
 #include "bmp280.h"
 #include "esp_log.h"
+#include "esp_lvgl_port.h"
+#include "ui_globals.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <stdio.h>
 
 static const char *TAG = "BMP280";
 
@@ -32,7 +35,7 @@ static esp_err_t read_registers(i2c_port_t i2c_num, uint8_t reg_addr, uint8_t *d
 esp_err_t bmp280_init(i2c_port_t i2c_num) {
     uint8_t chip_id = 0;
     if (read_registers(i2c_num, BMP280_REG_CHIPID, &chip_id, 1) != ESP_OK || chip_id != 0x58) {
-        ESP_LOGE(TAG, "BMP280 ID ´íÎó: 0x%02X", chip_id);
+        ESP_LOGE(TAG, "BMP280 ID ï¿½ï¿½ï¿½ï¿½: 0x%02X", chip_id);
         return ESP_FAIL;
     }
 
@@ -57,7 +60,7 @@ esp_err_t bmp280_init(i2c_port_t i2c_num) {
     write_register(i2c_num, BMP280_REG_CTRL_MEAS, 0x57);
     write_register(i2c_num, BMP280_REG_CONFIG, 0xA0);
 
-    ESP_LOGI(TAG, "BMP280 ³õÊ¼»¯³É¹¦!");
+    ESP_LOGI(TAG, "BMP280 ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½É¹ï¿½!");
     return ESP_OK;
 }
 
@@ -68,13 +71,13 @@ esp_err_t bmp280_read_data(i2c_port_t i2c_num, float *temperature, float *pressu
     int32_t adc_P = (raw[0] << 12) | (raw[1] << 4) | (raw[2] >> 4);
     int32_t adc_T = (raw[3] << 12) | (raw[4] << 4) | (raw[5] >> 4);
 
-    // ÎÂ¶È²¹³¥
+    // ï¿½Â¶È²ï¿½ï¿½ï¿½
     int32_t v1 = ((((adc_T >> 3) - ((int32_t)calib_data.dig_T1 << 1))) * ((int32_t)calib_data.dig_T2)) >> 11;
     int32_t v2 = (((((adc_T >> 4) - ((int32_t)calib_data.dig_T1)) * ((adc_T >> 4) - ((int32_t)calib_data.dig_T1))) >> 12) * ((int32_t)calib_data.dig_T3)) >> 14;
     t_fine = v1 + v2;
     *temperature = ((t_fine * 5 + 128) >> 8) / 100.0f;
 
-    // ÆøÑ¹²¹³¥
+    // ï¿½ï¿½Ñ¹ï¿½ï¿½ï¿½ï¿½
     int64_t p_v1, p_v2, p;
     p_v1 = ((int64_t)t_fine) - 128000;
     p_v2 = p_v1 * p_v1 * (int64_t)calib_data.dig_P6;
@@ -94,9 +97,22 @@ esp_err_t bmp280_read_data(i2c_port_t i2c_num, float *temperature, float *pressu
 
 void read_bmp280_task(void *pvParameters) {
     float temp, press;
+    char temp_str[16];
+
     while (1) {
         if (bmp280_read_data(I2C_NUM_0, &temp, &press) == ESP_OK) {
             ESP_LOGI(TAG, "Temp: %.2f C, Press: %.2f Pa", temp, press);
+
+            // ç”¨ snprintf æ ¼å¼åŒ–ï¼ˆLVGL ä¸æ”¯æŒ %fï¼‰
+            snprintf(temp_str, sizeof(temp_str), "%.1f C", temp);
+
+            // åŠ é”æ›´æ–° UI
+            if (lvgl_port_lock(0)) {
+                if (label_temp != NULL) {
+                    lv_label_set_text(label_temp, temp_str);
+                }
+                lvgl_port_unlock();
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(1000));
     }

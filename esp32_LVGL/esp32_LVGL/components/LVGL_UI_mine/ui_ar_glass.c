@@ -19,7 +19,7 @@ lv_obj_t * ui_main_screen;
 lv_obj_t * label_time;      // 时间标签
 lv_obj_t * label_date;      // 阳历日期标签
 lv_obj_t * label_lunar;     // 农历标签
-lv_obj_t * label_weather;   // 天气文本标签
+lv_obj_t * label_temp;      // 温度标签
 lv_obj_t * label_batt_pct;  // 电量数字标签
 lv_obj_t * icon_batt;       // 电池图标标签
 
@@ -68,23 +68,23 @@ void ui_ar_glass_init(void) {
     lv_obj_align(label_date, LV_ALIGN_CENTER, 0, 45);
 
     // -----------------------------------------------------
-    // D. 底部：天气容器与图标
+    // D. 底部：环境温度显示
     // -----------------------------------------------------
-    lv_obj_t * weather_cont = lv_obj_create(ui_main_screen);
-    lv_obj_set_size(weather_cont, 200, 50);
-    lv_obj_set_style_bg_opa(weather_cont, 0, 0);      
-    lv_obj_set_style_border_opa(weather_cont, 0, 0);  
-    lv_obj_align(weather_cont, LV_ALIGN_BOTTOM_MID, 0, -20);
-    lv_obj_set_flex_flow(weather_cont, LV_FLEX_FLOW_ROW); 
-    lv_obj_set_flex_align(weather_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_t * env_cont = lv_obj_create(ui_main_screen);
+    lv_obj_set_size(env_cont, 200, 50);
+    lv_obj_set_style_bg_opa(env_cont, 0, 0);
+    lv_obj_set_style_border_opa(env_cont, 0, 0);
+    lv_obj_align(env_cont, LV_ALIGN_BOTTOM_MID, 0, -20);
+    lv_obj_set_flex_flow(env_cont, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(env_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    lv_obj_t * icon_weather = lv_label_create(weather_cont);
-    lv_label_set_text(icon_weather, LV_SYMBOL_IMAGE); 
-    lv_obj_set_style_text_color(icon_weather, lv_palette_main(LV_PALETTE_YELLOW), 0);
+    lv_obj_t * icon_env = lv_label_create(env_cont);
+    lv_label_set_text(icon_env, "T: ");
+    lv_obj_set_style_text_color(icon_env, lv_color_hex(0xFF973B), 0);
 
-    label_weather = lv_label_create(weather_cont);
-    lv_obj_add_style(label_weather, &style_common, 0); 
-    lv_label_set_text(label_weather, " 获取中...");
+    label_temp = lv_label_create(env_cont);
+    lv_obj_add_style(label_temp, &style_common, 0);
+    lv_label_set_text(label_temp, " --.- C");
 
     // -----------------------------------------------------
     // E. 右上角：电量显示

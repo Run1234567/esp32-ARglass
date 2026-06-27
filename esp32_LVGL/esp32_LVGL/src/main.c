@@ -181,14 +181,6 @@ void app_main(void) {
     }
     ESP_ERROR_CHECK(ret);
 
-    // GPIO 5、6 设置为高电平（原音频引脚，现用于外部模块供电）
-    gpio_reset_pin(5);
-    gpio_reset_pin(6);
-    gpio_set_direction(5, GPIO_MODE_OUTPUT);
-    gpio_set_direction(6, GPIO_MODE_OUTPUT);
-    gpio_set_level(5, 1);
-    gpio_set_level(6, 1);
-
     // 按键引脚初始化（输入 + 内部上拉，按下为低电平）
     int btn_pins[] = {42, 41, 15, 16, 21};
     for (int i = 0; i < 5; i++) {

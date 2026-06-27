@@ -68,6 +68,8 @@ extern lv_obj_t * ui_health_screen;      // 心率血氧监测
 extern lv_obj_t * ui_wifi_scan_screen;   // Wi-Fi 扫描界面
 extern lv_obj_t * ui_gps_screen;         // GPS 定位界面
 extern lv_obj_t * ui_ai_screen;          // AI 字幕界面
+extern lv_obj_t * ui_call_screen;        // 网络通话界面
+extern lv_obj_t * ui_audio_switch_screen; // 音频切换界面
 
 // ============================================================
 //   MQTT 数据 / 时钟模块共享变量
@@ -78,7 +80,7 @@ extern lv_obj_t * ui_ai_screen;          // AI 字幕界面
 extern lv_obj_t * label_time;      // 时间标签（HH:MM:SS）
 extern lv_obj_t * label_date;      // 日期标签（YYYY-MM-DD）
 extern lv_obj_t * label_lunar;     // 农历日期标签
-extern lv_obj_t * label_weather;   // 天气信息标签
+extern lv_obj_t * label_temp;   // 天气信息标签
 extern lv_obj_t * label_batt_pct;  // 电池电量百分比标签
 extern lv_obj_t * icon_batt;       // 电池图标
 extern lv_obj_t * menu_roller;     // 主菜单滚轮选择器

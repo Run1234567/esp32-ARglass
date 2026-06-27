@@ -48,7 +48,9 @@ typedef enum {
     SCREEN_WIFI_SCAN,    // 21. Wi-Fi 扫描
     SCREEN_GPS,          // 22. GPS 定位
     SCREEN_AI_CHAT,      // 23. AI 字幕界面
-    SCREEN_LIGHT,        // 24. 光照传感器界面
+    SCREEN_CALL,         // 24. 网络通话
+    SCREEN_AUDIO_SWITCH, // 25. 音频输出切换
+    SCREEN_LIGHT,        // 26. 光照传感器界面
     SCREEN_HEALTH        // 19. 心率血氧监测
 } ui_screen_state_t;
 

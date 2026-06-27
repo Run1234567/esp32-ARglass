@@ -45,6 +45,8 @@
 #include "ui_wifi_scan_screen.h" // Wi-Fi 扫描
 #include "ui_gps_screen.h"       // GPS 定位
 #include "ui_ai_screen.h"       // AI 字幕
+#include "ui_call_screen.h"    // 网络通话
+#include "ui_audio_switch_screen.h" // 音频切换
 #include "max30102.h"          // MAX30102 心率传感器
 #include "my_uart.h"           // UART 串口通信模块
 
@@ -103,6 +105,8 @@ void switch_to_screen(ui_screen_state_t target_screen) {
         case SCREEN_WIFI_SCAN:   target_obj = ui_wifi_scan_screen;  break;
         case SCREEN_GPS:         target_obj = ui_gps_screen;        break;
         case SCREEN_AI_CHAT:     target_obj = ui_ai_screen;        break;
+        case SCREEN_CALL:        target_obj = ui_call_screen;      break;
+        case SCREEN_AUDIO_SWITCH: target_obj = ui_audio_switch_screen; break;
         case SCREEN_LIGHT:       target_obj = ui_light_screen;     break;
         case SCREEN_HEALTH:      target_obj = ui_health_screen;    break;
         default: return; 
@@ -141,6 +145,10 @@ void switch_to_screen(ui_screen_state_t target_screen) {
     }
     if (current_screen == SCREEN_GPS && target_screen != SCREEN_GPS) {
         ui_gps_stop_update();
+    }
+    if (current_screen == SCREEN_CALL && target_screen != SCREEN_CALL) {
+        extern volatile bool is_calling_now;
+        is_calling_now = false;
     }
     if (current_screen == SCREEN_HEALTH && target_screen != SCREEN_HEALTH) {
         max30102_stop_task(); 
@@ -218,6 +226,8 @@ static void process_ui_command(ui_cmd_t cmd) {
                 if (selected_idx == 12) switch_to_screen(SCREEN_LIGHT);
                 if (selected_idx == 13) switch_to_screen(SCREEN_WIFI_SCAN);
                 if (selected_idx == 14) switch_to_screen(SCREEN_GPS);
+                if (selected_idx == 15) switch_to_screen(SCREEN_CALL);
+                if (selected_idx == 16) switch_to_screen(SCREEN_AUDIO_SWITCH);
             }
             break;
 
@@ -312,6 +322,14 @@ static void process_ui_command(ui_cmd_t cmd) {
             ai_screen_handle_cmd(cmd);
             break;
 
+        case SCREEN_CALL:
+            call_screen_handle_cmd(cmd);
+            break;
+
+        case SCREEN_AUDIO_SWITCH:
+            audio_switch_handle_cmd(cmd);
+            break;
+
         case SCREEN_LIGHT:
             light_screen_handle_cmd(cmd);
             break;
@@ -369,6 +387,8 @@ void ui_manager_init(void) {
         ui_wifi_scan_screen_init();
         ui_gps_screen_init();
         ui_ai_screen_init();
+        ui_call_screen_init();
+        ui_audio_switch_screen_init();
         ui_light_screen_init();      
         ui_health_screen_init();     
 
