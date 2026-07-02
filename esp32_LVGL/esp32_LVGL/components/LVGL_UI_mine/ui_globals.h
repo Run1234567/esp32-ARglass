@@ -14,6 +14,11 @@
 #define _UI_GLOBALS_H
 
 #include "lvgl.h"  // 引入 LVGL 图形库核心头文件
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"  // SemaphoreHandle_t
+
+// I2C 总线互斥锁（保护 MPU6050/BMP280/MAX30102 共享总线）
+extern SemaphoreHandle_t i2c_mutex;
 
 // ============================================================
 //   手势/指令枚举类型定义

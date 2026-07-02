@@ -1,7 +1,17 @@
 #ifndef MY_WIFI_H
 #define MY_WIFI_H
 
-// ±©Â¶¸øÍâ²¿µ÷ÓÃµÄ Wi-Fi ³õÊ¼»¯º¯Êı
+// ï¿½ï¿½Â¶ï¿½ï¿½ï¿½â²¿ï¿½ï¿½ï¿½Ãµï¿½ Wi-Fi ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 void wifi_init_sta(void);
+void my_wifi_connect_from_ble(const char* ssid, const char* password);
+void save_wifi_to_nvs(const char* ssid, const char* pwd);
+
+// WiFi å†å²è®°å½•ç»“æ„ä½“ï¼ˆä¾›å¤–éƒ¨è¯»å–ç”¨ï¼‰
+typedef struct {
+    char ssid[33];
+    char password[65];
+} wifi_record_t;
+
+int load_wifi_history(wifi_record_t *out_records, int max_count);
 
 #endif // MY_WIFI_H

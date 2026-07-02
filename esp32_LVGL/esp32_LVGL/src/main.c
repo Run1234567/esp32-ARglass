@@ -48,9 +48,12 @@ LV_FONT_DECLARE(my_font_cn_16);
 #define I2C_MASTER_SCL_IO           1
 #define I2C_MASTER_SDA_IO           2
 #define I2C_MASTER_NUM              I2C_NUM_0
-#define I2C_MASTER_FREQ_HZ          100000
+#define I2C_MASTER_FREQ_HZ          50000
 
 static const char *TAG = "MAIN";
+
+// I2C 总线互斥锁（保护 MPU6050/BMP280/MAX30102 共享总线）
+SemaphoreHandle_t i2c_mutex = NULL;
 // ----------------------------------------------------
 // 全局唯一的 I2C 总线初始化函数
 // ----------------------------------------------------
@@ -65,8 +68,12 @@ static esp_err_t i2c_master_init(void) {
     };
     esp_err_t err = i2c_param_config(I2C_MASTER_NUM, &conf);
     if (err != ESP_OK) return err;
-    
-    return i2c_driver_install(I2C_MASTER_NUM, conf.mode, 0, 0, 0);
+
+    err = i2c_driver_install(I2C_MASTER_NUM, conf.mode, 0, 0, 0);
+    if (err == ESP_OK) {
+        i2c_mutex = xSemaphoreCreateMutex();
+    }
+    return err;
 }
 
 

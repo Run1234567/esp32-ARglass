@@ -2,56 +2,145 @@
 #include <stdio.h>
 #include <string.h>
 #include "esp_log.h"
+#include "cJSON.h"
+#include "my_wifi.h"
 #include "esp_nimble_hci.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "host/ble_hs.h"
 #include "services/gap/ble_svc_gap.h"
-#include "ui_manager.h" // 引入 UI 管理器
+#include "services/gatt/ble_svc_gatt.h"
+#include "ui_manager.h" // 你的 UI 管理器
 
-static const char *TAG = "BLE_CLIENT";
+static const char *TAG = "BLE_DUAL";
 
-// 目标服务器的名字 (必须和板子A的名字完全一样)
+// ==================== 全局变量 ====================
+// --- 魔杖端 (Client) ---
 #define TARGET_DEVICE_NAME "Cyberry_Wand"
+static uint16_t wand_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+static uint16_t wand_chr_val_handle = 0; // 0x2222 信箱操作句柄
+static bool is_wand_connected = false;
 
-// 记录连接句柄和信箱句柄
-static uint16_t peer_conn_handle = BLE_HS_CONN_HANDLE_NONE;
-static uint16_t peer_chr_val_handle = 0; // 0x2222 信箱的实际操作句柄
-static bool is_connected = false;
+// --- 网页端 (Server) ---
+static uint16_t web_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+static uint16_t web_char_val_handle = 0;
 
 static void blecent_scan(void);
-
-int8_t Key_Down_Flag = 0; // 下
-int8_t Key_Up_Flag = 0;   // 上
-int8_t Key_Confirm_Flag = 0; // 0: 没按，1: 确认
-int8_t Key_Return_Flag = 0;  // 0: 没按，1: 返回
+static void ble_app_advertise(void);
+static int blecent_gap_event(struct ble_gap_event *event, void *arg);
 
 // =======================================================
-// 4. 发送数据 API (供 main.c 调用)
+// 向网页端发送数据（Notify）
 // =======================================================
-bool my_ble_send_data(const char* data) {
-    if (!is_connected || peer_conn_handle == BLE_HS_CONN_HANDLE_NONE || peer_chr_val_handle == 0) {
-        return false; // 没连上，或者还没找到信箱
-    }
+bool my_ble_send_to_web(const char* data) {
+    if (web_conn_handle == BLE_HS_CONN_HANDLE_NONE) return false;
 
     struct os_mbuf *om = ble_hs_mbuf_from_flat(data, strlen(data));
-    if (!om) return false;
-
-    // 发起无响应写入 (Write Without Response)
-    int rc = ble_gattc_write_no_rsp(peer_conn_handle, peer_chr_val_handle, om);
+    int rc = ble_gatts_notify_custom(web_conn_handle, web_char_val_handle, om);
     return (rc == 0);
 }
 
 // =======================================================
-// 3. 寻找信箱的回调 (发现 0x2222)
+// 【新增】网页端：接收 HTML 数据的回调 (0x1112 -> 0x4444)
+// =======================================================
+static int web_gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle,
+                                   struct ble_gatt_access_ctxt *ctxt, void *arg) {
+    if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
+        int len = OS_MBUF_PKTLEN(ctxt->om);
+        if (len > 0) {
+            uint8_t rx_data[len + 1];
+            os_mbuf_copydata(ctxt->om, 0, len, rx_data);
+            rx_data[len] = '\0';
+            ESP_LOGI(TAG, "收到网页指令: %s", rx_data);
+
+            // 处理 SCAN_WIFI 指令
+            if (strcmp((char*)rx_data, "SCAN_WIFI") == 0) {
+                ESP_LOGI(TAG, "启动 Wi-Fi 扫描...");
+                extern void ui_wifi_scan_start(void);
+                ui_wifi_scan_start();
+            }
+            // 处理 JSON 格式的 WiFi 配网指令
+            else if (rx_data[0] == '{') {
+                cJSON *root = cJSON_Parse((char*)rx_data);
+                if (root != NULL) {
+                    cJSON *ssid_item = cJSON_GetObjectItem(root, "ssid");
+                    cJSON *pwd_item = cJSON_GetObjectItem(root, "pwd");
+                    if (ssid_item && pwd_item) {
+                        ESP_LOGI(TAG, "配网: SSID=%s", ssid_item->valuestring);
+                        save_wifi_to_nvs(ssid_item->valuestring, pwd_item->valuestring);
+                        my_wifi_connect_from_ble(ssid_item->valuestring, pwd_item->valuestring);
+                        my_ble_send_to_web("{\"status\":\"connecting\"}");
+                    }
+                    cJSON_Delete(root);
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+// 网页端的服务表定义
+static const struct ble_gatt_svc_def web_svr_svcs[] = {
+    {
+        .type = BLE_GATT_SVC_TYPE_PRIMARY,
+        .uuid = BLE_UUID16_DECLARE(0x1112),
+        .characteristics = (struct ble_gatt_chr_def[]) {
+            {
+                .uuid = BLE_UUID16_DECLARE(0x4444),
+                .access_cb = web_gatt_svr_chr_access,
+                .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_NOTIFY,
+                .val_handle = &web_char_val_handle
+            },
+            { 0 }
+        }
+    },
+    { 0 }
+};
+
+// =======================================================
+// 【新增】网页端：处理网页连接的 GAP 事件
+// =======================================================
+static int web_gap_event(struct ble_gap_event *event, void *arg) {
+    switch (event->type) {
+        case BLE_GAP_EVENT_CONNECT:
+            if (event->connect.status == 0) {
+                ESP_LOGI(TAG, "🔗 HTML 网页已成功连接！");
+                web_conn_handle = event->connect.conn_handle;
+            } else {
+                ble_app_advertise();
+            }
+            break;
+        case BLE_GAP_EVENT_DISCONNECT:
+            ESP_LOGI(TAG, "❌ HTML 网页连接断开，重新开启广播...");
+            web_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+            ble_app_advertise();
+            break;
+    }
+    return 0;
+}
+
+// =======================================================
+// 【保留】魔杖端：发送数据 API (供 main.c 调用，给魔杖发数据)
+// =======================================================
+bool my_ble_send_data(const char* data) {
+    if (!is_wand_connected || wand_conn_handle == BLE_HS_CONN_HANDLE_NONE || wand_chr_val_handle == 0) {
+        return false; 
+    }
+    struct os_mbuf *om = ble_hs_mbuf_from_flat(data, strlen(data));
+    if (!om) return false;
+    int rc = ble_gattc_write_no_rsp(wand_conn_handle, wand_chr_val_handle, om);
+    return (rc == 0);
+}
+
+// =======================================================
+// 【保留】魔杖端：寻找信箱的回调
 // =======================================================
 static int chr_disc_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
                        const struct ble_gatt_chr *chr, void *arg) {
     if (error->status == 0) {
-        // 找到了信箱！记录下它的操作句柄
-        peer_chr_val_handle = chr->val_handle;
-        is_connected = true;
-        ESP_LOGI(TAG, "? 成功找到 0x2222 信箱！现在可以发送数据了！");
+        wand_chr_val_handle = chr->val_handle;
+        is_wand_connected = true;
+        ESP_LOGI(TAG, "✅ 成功找到 0x2222 信箱！可以给魔杖发送数据了！");
     }
     return 0;
 }
@@ -59,8 +148,7 @@ static int chr_disc_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
 static int svc_disc_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
                        const struct ble_gatt_svc *service, void *arg) {
     if (error->status == 0) {
-        ESP_LOGI(TAG, "? 找到 0x1111 服务大楼，正在寻找 0x3333 信箱...");
-        // 拿着大楼的范围，进去找 0x3333 信箱
+        ESP_LOGI(TAG, "🏢 找到 0x1111 服务大楼，正在寻找 0x3333 信箱...");
         ble_uuid16_t chr_uuid = { .u.type = BLE_UUID_TYPE_16, .value = 0x3333 };
         ble_gattc_disc_chrs_by_uuid(conn_handle, service->start_handle, service->end_handle, 
                                     &chr_uuid.u, chr_disc_cb, NULL);
@@ -69,89 +157,66 @@ static int svc_disc_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
 }
 
 // =======================================================
-// 1. GAP 事件回调 (扫描、连接、断开)
+// 【保留】魔杖端：处理魔杖连接的 GAP 事件
 // =======================================================
 static int blecent_gap_event(struct ble_gap_event *event, void *arg) {
     switch (event->type) {
-        // --- 搜到新设备 ---
         case BLE_GAP_EVENT_DISC: {
             struct ble_hs_adv_fields fields;
             ble_hs_adv_parse_fields(&fields, event->disc.data, event->disc.length_data);
             
-            // 检查是不是我们要找的板子A
             if (fields.name != NULL && fields.name_len == strlen(TARGET_DEVICE_NAME)) {
                 if (strncmp((char*)fields.name, TARGET_DEVICE_NAME, fields.name_len) == 0) {
-                    ESP_LOGI(TAG, "? 发现目标！停止扫描，准备连接...");
-                    ble_gap_disc_cancel(); // 停止扫描
-                    // 发起连接
+                    ESP_LOGI(TAG, "🎯 发现魔杖！停止扫描，准备连接...");
+                    ble_gap_disc_cancel(); 
+                    // ⚠️ 注意：连接成功后继续使用 blecent_gap_event 处理魔杖的事件
                     ble_gap_connect(BLE_OWN_ADDR_PUBLIC, &event->disc.addr, 30000, NULL, blecent_gap_event, NULL);
                 }
             }
             break;
         }
         
-        // --- 连接成功或失败 ---
         case BLE_GAP_EVENT_CONNECT: {
             if (event->connect.status == 0) {
-                ESP_LOGI(TAG, "? 物理连接成功！正在寻找服务...");
-                peer_conn_handle = event->connect.conn_handle;
+                ESP_LOGI(TAG, "🔌 物理连接魔杖成功！正在寻找服务...");
+                wand_conn_handle = event->connect.conn_handle;
                 
-                // 连接成功后，马上去寻找 0x1111 大楼
                 ble_uuid16_t svc_uuid = { .u.type = BLE_UUID_TYPE_16, .value = 0x1111 };
-                ble_gattc_disc_svc_by_uuid(peer_conn_handle, &svc_uuid.u, svc_disc_cb, NULL);
+                ble_gattc_disc_svc_by_uuid(wand_conn_handle, &svc_uuid.u, svc_disc_cb, NULL);
             } else {
-                ESP_LOGE(TAG, "? 连接失败，重新开始扫描...");
+                ESP_LOGE(TAG, "⚠️ 连接魔杖失败，重新开始扫描...");
                 blecent_scan();
             }
             break;
         }
 
-        // --- 连接断开 ---
         case BLE_GAP_EVENT_DISCONNECT: {
-            ESP_LOGW(TAG, "? 连接断开，重新开始扫描...");
-            peer_conn_handle = BLE_HS_CONN_HANDLE_NONE;
-            peer_chr_val_handle = 0;
-            is_connected = false;
+            ESP_LOGW(TAG, "⚠️ 与魔杖连接断开，重新开始扫描...");
+            wand_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+            wand_chr_val_handle = 0;
+            is_wand_connected = false;
             blecent_scan();
             break;
         }
-        // --- 收到 Server 发来的通知 (Notify) 并在屏幕响应 ---
+
         case BLE_GAP_EVENT_NOTIFY_RX: {
             uint16_t len = OS_MBUF_PKTLEN(event->notify_rx.om);
             if (len > 0) {
-                // 安全提取字符串
                 uint8_t received_data[len + 1];
                 os_mbuf_copydata(event->notify_rx.om, 0, len, received_data);
                 received_data[len] = '\0';
 
-                ESP_LOGI(TAG, "收到魔杖指令: %s", received_data);
+                ESP_LOGI(TAG, "🪄 收到魔杖指令: %s", received_data);
 
                 ui_cmd_t cmd = UI_CMD_NONE;
-
-                // 根据收到的字符串，映射到 UI 指令并发送到队列
-                if (strstr((char*)received_data, "SwipeUp") != NULL) {
-                    ESP_LOGI(TAG, "执行: 菜单向上 / 旋转");
-                    cmd = UI_CMD_UP;
-                }
-                else if (strstr((char*)received_data, "SwipeDown") != NULL) {
-                    ESP_LOGI(TAG, "执行: 菜单向下 / 加速下落");
-                    cmd = UI_CMD_DOWN;
-                }
-                else if (strstr((char*)received_data, "SwipeRight") != NULL) {
-                    ESP_LOGI(TAG, "执行: 确认 / 右移");
-                    cmd = UI_CMD_RIGHT;
-                }
-                else if (strstr((char*)received_data, "SwipeLeft") != NULL) {
-                    ESP_LOGI(TAG, "执行: 返回 / 左移");
-                    cmd = UI_CMD_LEFT;
-                }
-                else if (strstr((char*)received_data, "Circle") != NULL) {
-                    ESP_LOGI(TAG, "执行: 画圆 / 暂停游戏");
-                    cmd = UI_CMD_CIRCLE;
-                }
+                if (strstr((char*)received_data, "SwipeUp") != NULL) cmd = UI_CMD_UP;
+                else if (strstr((char*)received_data, "SwipeDown") != NULL) cmd = UI_CMD_DOWN;
+                else if (strstr((char*)received_data, "SwipeRight") != NULL) cmd = UI_CMD_RIGHT;
+                else if (strstr((char*)received_data, "SwipeLeft") != NULL) cmd = UI_CMD_LEFT;
+                else if (strstr((char*)received_data, "Circle") != NULL) cmd = UI_CMD_CIRCLE;
 
                 if (cmd != UI_CMD_NONE && ui_cmd_queue != NULL) {
-                    xQueueSend(ui_cmd_queue, &cmd, 0); // 发送到 UI 队列
+                    xQueueSend(ui_cmd_queue, &cmd, 0); 
                 }
             }
             break;
@@ -160,7 +225,9 @@ static int blecent_gap_event(struct ble_gap_event *event, void *arg) {
     return 0;
 }
 
-// 启动扫描
+// =======================================================
+// 【功能启动区】
+// =======================================================
 static void blecent_scan(void) {
     struct ble_gap_disc_params disc_params;
     memset(&disc_params, 0, sizeof disc_params);
@@ -169,27 +236,55 @@ static void blecent_scan(void) {
     disc_params.itvl = 0;
     disc_params.window = 0;
     
+    // 启动扫描，用 blecent_gap_event 接收扫描结果
     ble_gap_disc(BLE_OWN_ADDR_PUBLIC, BLE_HS_FOREVER, &disc_params, blecent_gap_event, NULL);
-    ESP_LOGI(TAG, "???♂? 开始扫描附近的设备...");
+    ESP_LOGI(TAG, "🕵️‍♂️ 开始扫描附近的魔杖...");
 }
 
-static void blecent_on_sync(void) {
-    blecent_scan(); // 协议栈启动后，立刻开始扫描
+static void ble_app_advertise(void) {
+    struct ble_hs_adv_fields fields;
+    memset(&fields, 0, sizeof(fields));
+    
+    fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
+    fields.name = (uint8_t *)"ESP_Web"; // HTML网页去搜这个名字
+    fields.name_len = strlen("ESP_Web");
+    fields.name_is_complete = 1;
+    ble_gap_adv_set_fields(&fields);
+
+    struct ble_gap_adv_params adv_params;
+    memset(&adv_params, 0, sizeof(adv_params));
+    adv_params.conn_mode = BLE_GAP_CONN_MODE_UND;
+    adv_params.disc_mode = BLE_GAP_DISC_MODE_GEN;
+    
+    // 开启广播，用单独的 web_gap_event 来处理网页的连接，彻底和魔杖事件剥离！
+    ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, BLE_HS_FOREVER, &adv_params, web_gap_event, NULL);
+    ESP_LOGI(TAG, "📡 专属网页通道广播已开启，等待 HTML 连接...");
 }
 
-void nimble_host_task(void *param) {
+static void ble_on_sync(void) {
+    // 协议栈就绪后，两件事同时干！
+    blecent_scan();      // 1. 去搜物理魔杖
+    ble_app_advertise(); // 2. 开启广播等网页连
+}
+
+static void nimble_host_task(void *param) {
     nimble_port_run();
     nimble_port_freertos_deinit();
 }
 
 // 供 main.c 调用的初始化函数
 void my_ble_init(const char* device_name) {
-    ESP_LOGI(TAG, "初始化 BLE 客户端模块...");
+    ESP_LOGI(TAG, "🚀 初始化双模 BLE (Client连魔杖 + Server等网页)...");
     nimble_port_init();
-    ble_hs_cfg.sync_cb = blecent_on_sync;
     
-    // 设置设备名称 (虽然是 Client，但也设一下)
-    ble_svc_gap_device_name_set(device_name);
+    // 初始化网页端需要的服务
+    ble_svc_gap_init();
+    ble_svc_gatt_init();
+    ble_gatts_count_cfg(web_svr_svcs);
+    ble_gatts_add_svcs(web_svr_svcs);
+    
+    ble_hs_cfg.sync_cb = ble_on_sync;
+    ble_svc_gap_device_name_set("ESP_Web"); 
     
     nimble_port_freertos_init(nimble_host_task);
 }

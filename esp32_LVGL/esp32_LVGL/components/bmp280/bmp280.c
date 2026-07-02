@@ -4,6 +4,7 @@
 #include "ui_globals.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include <stdio.h>
 
 static const char *TAG = "BMP280";
@@ -34,13 +35,20 @@ static esp_err_t read_registers(i2c_port_t i2c_num, uint8_t reg_addr, uint8_t *d
 
 esp_err_t bmp280_init(i2c_port_t i2c_num) {
     uint8_t chip_id = 0;
+
+    if (i2c_mutex) xSemaphoreTake(i2c_mutex, pdMS_TO_TICKS(500));
+
     if (read_registers(i2c_num, BMP280_REG_CHIPID, &chip_id, 1) != ESP_OK || chip_id != 0x58) {
-        ESP_LOGE(TAG, "BMP280 ID ����: 0x%02X", chip_id);
+        ESP_LOGE(TAG, "BMP280 ID 错误: 0x%02X", chip_id);
+        if (i2c_mutex) xSemaphoreGive(i2c_mutex);
         return ESP_FAIL;
     }
 
     write_register(i2c_num, BMP280_REG_RESET, 0xB6);
+    if (i2c_mutex) xSemaphoreGive(i2c_mutex);
     vTaskDelay(pdMS_TO_TICKS(100));
+
+    if (i2c_mutex) xSemaphoreTake(i2c_mutex, pdMS_TO_TICKS(500));
 
     uint8_t calib[24];
     read_registers(i2c_num, 0x88, calib, 24);
@@ -57,16 +65,30 @@ esp_err_t bmp280_init(i2c_port_t i2c_num) {
     calib_data.dig_P8 = (calib[21] << 8) | calib[20];
     calib_data.dig_P9 = (calib[23] << 8) | calib[22];
 
-    write_register(i2c_num, BMP280_REG_CTRL_MEAS, 0x57);
+    // 先写 CONFIG（芯片还在 Sleep 模式，允许安全修改）
     write_register(i2c_num, BMP280_REG_CONFIG, 0xA0);
+    // 最后写 CTRL_MEAS，正式进入 Normal 模式启动测量
+    write_register(i2c_num, BMP280_REG_CTRL_MEAS, 0x57);
 
-    ESP_LOGI(TAG, "BMP280 ��ʼ���ɹ�!");
+    if (i2c_mutex) xSemaphoreGive(i2c_mutex);
+
+    ESP_LOGI(TAG, "BMP280 初始化成功!");
     return ESP_OK;
 }
 
 esp_err_t bmp280_read_data(i2c_port_t i2c_num, float *temperature, float *pressure) {
     uint8_t raw[6];
-    if (read_registers(i2c_num, BMP280_REG_PRESS_MSB, raw, 6) != ESP_OK) return ESP_FAIL;
+
+    // 加锁保护 I2C 总线（防止 MPU6050/MAX30102 并发冲突）
+    if (i2c_mutex && xSemaphoreTake(i2c_mutex, pdMS_TO_TICKS(500)) != pdTRUE) {
+        return ESP_FAIL;
+    }
+
+    esp_err_t err = read_registers(i2c_num, BMP280_REG_PRESS_MSB, raw, 6);
+
+    if (i2c_mutex) xSemaphoreGive(i2c_mutex);
+
+    if (err != ESP_OK) return ESP_FAIL;
 
     int32_t adc_P = (raw[0] << 12) | (raw[1] << 4) | (raw[2] >> 4);
     int32_t adc_T = (raw[3] << 12) | (raw[4] << 4) | (raw[5] >> 4);
@@ -90,7 +112,7 @@ esp_err_t bmp280_read_data(i2c_port_t i2c_num, float *temperature, float *pressu
     p = (((p << 31) - p_v2) * 3125) / p_v1;
     p_v1 = (((int64_t)calib_data.dig_P9) * (p >> 13) * (p >> 13)) >> 25;
     p_v2 = (((int64_t)calib_data.dig_P8) * p) >> 19;
-    *pressure = ((p + p_v1 + p_v2) >> 8) / 256.0f + (((int64_t)calib_data.dig_P7) << 4) / 256.0f;
+    *pressure = ((p + p_v1 + p_v2) >> 8) / 256.0f + (((int64_t)calib_data.dig_P7) >> 4) / 256.0f;
 
     return ESP_OK;
 }
@@ -98,20 +120,29 @@ esp_err_t bmp280_read_data(i2c_port_t i2c_num, float *temperature, float *pressu
 void read_bmp280_task(void *pvParameters) {
     float temp, press;
     char temp_str[16];
+    int fail_count = 0;
 
     while (1) {
-        if (bmp280_read_data(I2C_NUM_0, &temp, &press) == ESP_OK) {
-            ESP_LOGI(TAG, "Temp: %.2f C, Press: %.2f Pa", temp, press);
-
-            // 用 snprintf 格式化（LVGL 不支持 %f）
+        esp_err_t err = bmp280_read_data(I2C_NUM_0, &temp, &press);
+        if (err == ESP_OK) {
+            fail_count = 0;
             snprintf(temp_str, sizeof(temp_str), "%.1f C", temp);
 
-            // 加锁更新 UI
             if (lvgl_port_lock(0)) {
                 if (label_temp != NULL) {
                     lv_label_set_text(label_temp, temp_str);
                 }
                 lvgl_port_unlock();
+            }
+        } else {
+            fail_count++;
+            if (fail_count <= 3 || fail_count % 10 == 0) {
+                ESP_LOGW(TAG, "读取失败 #%d", fail_count);
+            }
+            if (fail_count > 10) {
+                ESP_LOGE(TAG, "连续失败，仅对 BMP280 执行软复位");
+                bmp280_init(I2C_NUM_0);
+                fail_count = 0;
             }
         }
         vTaskDelay(pdMS_TO_TICKS(1000));

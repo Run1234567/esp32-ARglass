@@ -1,4 +1,4 @@
-# ½« REQUIRES ÀïµÄ nimble ¸ÄÎª bt
+# ï¿½ï¿½ REQUIRES ï¿½ï¿½ï¿½ nimble ï¿½ï¿½Îª bt
 idf_component_register(SRCS "my_ble.c"
                        INCLUDE_DIRS "."
-                       REQUIRES nvs_flash bt LVGL_UI_mine)
+                       REQUIRES nvs_flash bt LVGL_UI_mine my_wifi)
