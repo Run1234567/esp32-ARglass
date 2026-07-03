@@ -30,6 +30,7 @@
 #include "ui_novel_screen.h" // 引入小说屏幕的头文件，里面有初始化函数声明
 #include "ui_manager.h"
 #include "light_sensor.h"  // 光照传感器驱动（TEMT6000，GPIO 4）
+#include "gps.h"           // GPS 模块
 #include "gps.h"           // GPS 模块驱动（ATGM336H，UART1）
 #include "max30102.h"      // MAX30102 心率血氧传感器
 #include "paj7620.h"       // PAJ7620 手势识别传感器
@@ -145,6 +146,38 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base, i
     }
 }
 
+// 传感器数据定时上传 MQTT（每 5 秒）
+static void sensor_mqtt_task(void *arg) {
+    extern void app_mqtt_publish(const char *topic, const char *data);
+    extern esp_err_t bmp280_read_temp(i2c_port_t i2c_num, float *temperature);
+    extern gps_data_t gps_get_data(void);
+    char buf[32];
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(5000));
+
+        // 光照
+        float lux = light_sensor_get_lux();
+        snprintf(buf, sizeof(buf), "%.1f", lux);
+        app_mqtt_publish("esp32/glass/light", buf);
+
+        // 温度
+        float temp;
+        if (bmp280_read_temp(I2C_NUM_0, &temp) == ESP_OK) {
+            snprintf(buf, sizeof(buf), "%.1f", temp);
+            app_mqtt_publish("esp32/glass/temp", buf);
+        }
+
+        // GPS 经纬度
+        gps_data_t gps = gps_get_data();
+        if (gps.valid) {
+            snprintf(buf, sizeof(buf), "%.6f", gps.latitude);
+            app_mqtt_publish("esp32/glass/lat", buf);
+            snprintf(buf, sizeof(buf), "%.6f", gps.longitude);
+            app_mqtt_publish("esp32/glass/lng", buf);
+        }
+    }
+}
+
 // 按键扫描任务（映射到 UI 手势指令）
 static void btn_scan_task(void *arg) {
     const int btn_pins[] = {42, 41, 15, 16, 21};
@@ -196,6 +229,7 @@ void app_main(void) {
         gpio_set_pull_mode(btn_pins[i], GPIO_PULLUP_ONLY);
     }
     xTaskCreatePinnedToCore(btn_scan_task, "btn_scan", 4096, NULL, 3, NULL, 0);
+    xTaskCreatePinnedToCore(sensor_mqtt_task, "sensor_mqtt", 4096, NULL, 2, NULL, 0);
 
     my_ble_init("My_Smart_JARVIS");
     ESP_LOGI(TAG, "1. 启动物理屏幕驱动...");
@@ -291,8 +325,7 @@ void app_main(void) {
     };
     ws_client = esp_websocket_client_init(&websocket_cfg);
     esp_websocket_register_events(ws_client, WEBSOCKET_EVENT_ANY, websocket_event_handler, (void *)ws_client);
-    esp_websocket_client_start(ws_client);
-    app_mqtt_start();
+    // MQTT 和 WebSocket 在 WiFi 连上后才启动（my_wifi.c 的 GOT_IP 回调）
     time_sync_init(); // 启动时间同步，确保时间显示正确
     // 10. 创建传感器读取任务
     // ?? 注意：前提是你已经在其他文件实现了 read_mpu6050_task，否则编译会报错找不到该函数

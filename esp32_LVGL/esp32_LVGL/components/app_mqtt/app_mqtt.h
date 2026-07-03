@@ -3,13 +3,14 @@
 
 #include "mqtt_client.h"
 
-// ±©Â¶³öÈ«¾Ö¿Í»§¶Ë¾ä±ú
+// ï¿½ï¿½Â¶ï¿½ï¿½È«ï¿½Ö¿Í»ï¿½ï¿½Ë¾ï¿½ï¿½
 extern esp_mqtt_client_handle_t mqtt_client;
+extern bool is_mqtt_connected;
 
-// ³õÊ¼»¯²¢Æô¶¯ MQTT
+// åˆå§‹åŒ–å¹¶å¯åŠ¨ MQTT
 void app_mqtt_start(void);
 
-// ·â×°Ò»¸ö¿ì½İ·¢ËÍº¯Êı
+// ï¿½ï¿½×°Ò»ï¿½ï¿½ï¿½ï¿½İ·ï¿½ï¿½Íºï¿½ï¿½ï¿½
 void app_mqtt_publish(const char *topic, const char *data);
 
 #endif // APP_MQTT_H

@@ -23,6 +23,7 @@ static lv_obj_t * label_scan_status;
 // ============================================================
 static void wifi_scan_task(void *pvParameters) {
     ESP_LOGI(TAG, "扫描任务启动");
+    extern bool my_ble_send_to_web(const char* data);
 
     wifi_mode_t mode;
     if (esp_wifi_get_mode(&mode) != ESP_OK) {
@@ -31,6 +32,7 @@ static void wifi_scan_task(void *pvParameters) {
             lv_label_set_text(label_scan_status, "Wi-Fi 未初始化");
             lvgl_port_unlock();
         }
+        my_ble_send_to_web("SCAN_FAIL");
         vTaskDelete(NULL);
         return;
     }
@@ -39,9 +41,19 @@ static void wifi_scan_task(void *pvParameters) {
         .ssid = 0, .bssid = 0, .channel = 0, .show_hidden = false
     };
 
-    // 非阻塞扫描，避免被 MQTT/WebSocket 卡住
     esp_err_t err = esp_wifi_scan_start(&scan_config, false);
     ESP_LOGI(TAG, "扫描启动: %s", esp_err_to_name(err));
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "扫描启动失败");
+        if (lvgl_port_lock(-1)) {
+            lv_label_set_text(label_scan_status, "扫描启动失败");
+            lvgl_port_unlock();
+        }
+        my_ble_send_to_web("SCAN_FAIL");
+        vTaskDelete(NULL);
+        return;
+    }
 
     // 等待 10 秒让扫描完成
     vTaskDelay(pdMS_TO_TICKS(10000));
@@ -98,9 +110,17 @@ static void wifi_scan_task(void *pvParameters) {
                     lvgl_port_unlock();
                 }
 
+                // 通过蓝牙发送扫描结果给网页
+                for (int i = 0; i < unique_count; i++) {
+                    char msg[64];
+                    snprintf(msg, sizeof(msg), "%s:%d", unique_aps[i].ssid, unique_aps[i].rssi);
+                    my_ble_send_to_web(msg);
+                    vTaskDelay(pdMS_TO_TICKS(50));
+                }
+                my_ble_send_to_web("SCAN_DONE");
+
                 free(unique_aps);
             }
-
             free(ap_info);
         }
     } else {
@@ -108,6 +128,7 @@ static void wifi_scan_task(void *pvParameters) {
             lv_label_set_text(label_scan_status, "未发现网络");
             lvgl_port_unlock();
         }
+        my_ble_send_to_web("SCAN_FAIL");
     }
 
     ESP_LOGI(TAG, "扫描结束");
@@ -125,7 +146,6 @@ void ui_wifi_scan_start(void) {
         lvgl_port_unlock();
     }
 
-    // 栈放 PSRAM
     StackType_t *wifi_stack = heap_caps_malloc(3072, MALLOC_CAP_SPIRAM);
     StaticTask_t *wifi_tcb = heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (wifi_stack && wifi_tcb) {
@@ -150,27 +170,22 @@ void ui_wifi_scan_screen_init(void) {
     lv_obj_set_style_border_width(ui_wifi_scan_screen, 0, 0);
     lv_obj_set_style_radius(ui_wifi_scan_screen, 0, 0);
 
-    // 顶部状态标签
     label_scan_status = lv_label_create(ui_wifi_scan_screen);
     lv_obj_set_style_text_font(label_scan_status, &my_font_cn_16, 0);
     lv_obj_set_style_text_color(label_scan_status, lv_color_white(), 0);
     lv_label_set_text(label_scan_status, "准备扫描...");
     lv_obj_align(label_scan_status, LV_ALIGN_TOP_MID, 0, 10);
 
-    // Wi-Fi 列表
     ui_wifi_list = lv_list_create(ui_wifi_scan_screen);
     lv_obj_set_size(ui_wifi_list, 220, 180);
     lv_obj_align(ui_wifi_list, LV_ALIGN_BOTTOM_MID, 0, -10);
 
-    // 彻底清除列表默认主题样式
     lv_obj_set_style_bg_color(ui_wifi_list, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(ui_wifi_list, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(ui_wifi_list, 0, 0);
     lv_obj_set_style_radius(ui_wifi_list, 0, 0);
     lv_obj_set_style_text_font(ui_wifi_list, &my_font_cn_16, 0);
     lv_obj_set_style_text_color(ui_wifi_list, lv_color_white(), 0);
-
-    // 隐藏滚动条（防止滑动时出现白条）
     lv_obj_set_style_opa(ui_wifi_list, LV_OPA_TRANSP, LV_PART_SCROLLBAR);
 }
 

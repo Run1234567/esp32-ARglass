@@ -8,7 +8,7 @@
 #define BMP280_I2C_ADDR             0x76 
 
 esp_err_t bmp280_init(i2c_port_t i2c_num);
-esp_err_t bmp280_read_data(i2c_port_t i2c_num, float *temperature, float *pressure);
+esp_err_t bmp280_read_temp(i2c_port_t i2c_num, float *temperature);
 void read_bmp280_task(void *pvParameters);
 
 #endif
