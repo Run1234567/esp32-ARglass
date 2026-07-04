@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>遥控器 - AR GLASS</title>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #000000;
+            --surface-color: rgba(255, 255, 255, 0.05);
+            --surface-hover: rgba(255, 255, 255, 0.1);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --text-primary: #ffffff;
+            --text-secondary: rgba(255, 255, 255, 0.5);
+            --accent-color: #ffffff;
+            --success-color: #34C759; /* Apple Green */
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+        }
+
+        body {
+            min-height: 100vh;
+            min-height: 100dvh;
+            background: var(--bg-color);
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: var(--text-primary);
+        }
+
+        /* ========== 高级环境光背景 ========== */
+        .ambient-glow {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            width: 80vw;
+            height: 80vw;
+            transform: translate(-50%, -50%);
+            background: radial-gradient(circle, rgba(255,255,255,0.06) 0%, transparent 60%);
+            z-index: 0;
+            pointer-events: none;
+            transition: all 0.5s ease;
+        }
+
+        /* ========== 头部 (灵动岛风格) ========== */
+        .header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            z-index: 100;
+            padding: 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .back-btn {
+            width: 44px;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        .back-btn:active {
+            background: var(--surface-hover);
+        }
+
+        .back-btn svg {
+            width: 20px;
+            height: 20px;
+            stroke: var(--text-primary);
+        }
+
+        .connection-badge {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: 30px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .connection-badge.connected {
+            border-color: rgba(52, 199, 89, 0.3);
+            background: rgba(52, 199, 89, 0.1);
+        }
+
+        .badge-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--text-secondary);
+            transition: background 0.3s ease;
+        }
+
+        .connection-badge.connected .badge-dot {
+            background: var(--success-color);
+            box-shadow: 0 0 10px rgba(52, 199, 89, 0.5);
+        }
+
+        /* ========== 连接方式选择器 ========== */
+        .mode-selector {
+            position: fixed;
+            top: 75px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 0.5rem;
+            z-index: 100;
+            background: rgba(30, 30, 30, 0.8);
+            padding: 0.3rem;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+
+        .mode-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.5rem 1rem;
+            border-radius: 9px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.5);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: 1px solid transparent;
+        }
+
+        .mode-btn.active {
+            color: #fff;
+            background: rgba(10, 132, 255, 0.3);
+            border-color: rgba(10, 132, 255, 0.4);
+        }
+
+        .mode-btn svg {
+            stroke: currentColor;
+        }
+
+        /* ========== 主容器 ========== */
+        .container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            padding-top: 20px;
+        }
+
+        /* ========== 一体化触控盘 (Apple TV 风格) ========== */
+        .remote-wrapper {
+            position: relative;
+            width: 280px;
+            height: 280px;
+            background: rgba(20, 20, 20, 0.6);
+            border: 1px solid var(--border-color);
+            border-radius: 50%;
+            box-shadow: 
+                0 20px 40px rgba(0, 0, 0, 0.5),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(30px);
+            -webkit-backdrop-filter: blur(30px);
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        /* 细微的十字分割线 */
+        .remote-wrapper::before,
+        .remote-wrapper::after {
+            content: '';
+            position: absolute;
+            background: rgba(255, 255, 255, 0.03);
+            z-index: 1;
+            pointer-events: none;
+        }
+        .remote-wrapper::before { top: 0; bottom: 0; left: 50%; width: 1px; }
+        .remote-wrapper::after { left: 0; right: 0; top: 50%; height: 1px; }
+
+        .direction-btn {
+            position: absolute;
+            width: 50%;
+            height: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background 0.2s ease;
+            z-index: 2;
+        }
+
+        .direction-btn:active {
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .direction-btn svg {
+            width: 22px;
+            height: 22px;
+            stroke: var(--text-secondary);
+            transition: stroke 0.2s ease, transform 0.2s ease;
+        }
+
+        .direction-btn:active svg {
+            stroke: var(--text-primary);
+            transform: scale(1.1);
+        }
+
+        /* 方向键定位 */
+        .btn-up { top: 0; left: 25%; width: 50%; align-items: flex-start; padding-top: 25px; }
+        .btn-down { bottom: 0; left: 25%; width: 50%; align-items: flex-end; padding-bottom: 25px; }
+        .btn-left { left: 0; top: 25%; height: 50%; justify-content: flex-start; padding-left: 25px; }
+        .btn-right { right: 0; top: 25%; height: 50%; justify-content: flex-end; padding-right: 25px; }
+
+        /* 中心确认键 */
+        .btn-center {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 110px;
+            height: 110px;
+            background: #1a1a1a;
+            border-radius: 50%;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 10;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .btn-center:active {
+            transform: translate(-50%, -50%) scale(0.94);
+            background: #252525;
+            box-shadow: 0 5px 10px rgba(0, 0, 0, 0.4);
+        }
+
+        .btn-center-icon {
+            font-size: 1rem;
+            font-weight: 500;
+            letter-spacing: 1px;
+            color: var(--text-primary);
+            opacity: 0.8;
+            transition: opacity 0.2s;
+        }
+
+        /* ========== 底部功能区 ========== */
+        .bottom-section {
+            margin-top: 4rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2.5rem;
+            width: 100%;
+            transition: margin 0.3s ease;
+        }
+
+        .func-buttons {
+            display: flex;
+            gap: 1.5rem;
+        }
+
+        .func-btn {
+            width: 60px;
+            height: 60px;
+            border-radius: 30px;
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .func-btn:active {
+            transform: scale(0.9);
+            background: var(--surface-hover);
+        }
+
+        .func-btn .icon {
+            font-size: 1.1rem;
+            margin-bottom: 2px;
+            opacity: 0.9;
+        }
+
+        .func-btn .label {
+            font-size: 0.6rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        /* ========== 状态输出 (Toast风格) ========== */
+        .output-display {
+            padding: 0.8rem 1.5rem;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 20px;
+            font-size: 0.8rem;
+            color: var(--text-primary);
+            min-width: 180px;
+            text-align: center;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.3s ease;
+        }
+
+        .output-display.active {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* =========================================
+           🖥️ PC 端专属适配 (Media Queries)
+           当屏幕宽度大于 768px 时，自动触发大屏布局
+           ========================================= */
+        @media (min-width: 768px) {
+            /* 1. 环境光向中心收束 */
+            .ambient-glow {
+                width: 40vw;
+                height: 40vw;
+            }
+
+            /* 2. 放大遥控触控盘 */
+            .remote-wrapper {
+                width: 320px;
+                height: 320px;
+            }
+
+            .btn-center {
+                width: 124px;
+                height: 124px;
+            }
+
+            .bottom-section {
+                margin-top: 5rem;
+            }
+
+            .func-btn {
+                width: 70px;
+                height: 70px;
+                border-radius: 35px;
+            }
+
+            .func-btn .label {
+                font-size: 0.65rem;
+            }
+
+            /* 3. PC 独占悬停动效 (Hover) */
+            .back-btn:hover {
+                background: rgba(255, 255, 255, 0.1);
+            }
+
+            .mode-btn:hover {
+                color: rgba(255, 255, 255, 0.8);
+                background: rgba(255, 255, 255, 0.05);
+            }
+
+            .direction-btn:hover {
+                background: rgba(255, 255, 255, 0.04); /* 极轻微的扇形高光 */
+            }
+
+            .direction-btn:hover svg {
+                stroke: var(--text-primary);
+                transform: scale(1.15); /* 鼠标滑过时线条提亮并放大 */
+            }
+
+            .btn-center:hover {
+                background: #202020;
+                box-shadow: 0 15px 30px rgba(0, 0, 0, 0.6);
+            }
+
+            .btn-center:hover .btn-center-icon {
+                opacity: 1;
+                transform: scale(1.05);
+            }
+
+            .func-btn:hover {
+                transform: translateY(-4px);
+                background: rgba(255, 255, 255, 0.12);
+                box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+            }
+        }
+
+        /* 移动端矮屏幕特调 */
+        @media (max-height: 700px) {
+            .remote-wrapper { width: 240px; height: 240px; }
+            .btn-center { width: 90px; height: 90px; }
+            .bottom-section { margin-top: 2rem; gap: 1.5rem; }
+            .func-btn { width: 50px; height: 50px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="ambient-glow"></div>
+
+    <header class="header">
+        <div class="back-btn" id="backBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="15 18 9 12 15 6"></polyline>
+            </svg>
+        </div>
+        <div class="connection-badge" id="connBadge">
+            <div class="badge-dot"></div>
+            <span id="connText">未连接</span>
+        </div>
+    </header>
+
+    <div class="mode-selector">
+        <div class="mode-btn active" data-mode="mqtt" id="modeMqtt">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M5 12.55a11 11 0 0 1 14.08 0"></path>
+                <path d="M1.42 9a16 16 0 0 1 21.16 0"></path>
+                <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+                <line x1="12" y1="20" x2="12.01" y2="20"></line>
+            </svg>
+            <span>MQTT</span>
+        </div>
+        <div class="mode-btn" data-mode="ble" id="modeBle">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M6.5 6.5l11 11L12 23V1l5.5 5.5-11 11"></path>
+            </svg>
+            <span>蓝牙</span>
+        </div>
+    </div>
+
+    <main class="container">
+        <div class="remote-wrapper">
+            <div class="direction-btn btn-up" data-cmd="UP">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="18 15 12 9 6 15"></polyline>
+                </svg>
+            </div>
+
+            <div class="direction-btn btn-down" data-cmd="DOWN">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+            </div>
+
+            <div class="direction-btn btn-left" data-cmd="LEFT">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="15 18 9 12 15 6"></polyline>
+                </svg>
+            </div>
+
+            <div class="direction-btn btn-right" data-cmd="RIGHT">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                </svg>
+            </div>
+
+            <div class="btn-center" data-cmd="OK">
+                <div class="btn-center-icon">OK</div>
+            </div>
+        </div>
+
+        <div class="bottom-section">
+            <div class="func-buttons">
+                <div class="func-btn" data-cmd="A">
+                    <span class="icon">􀀁</span> <span class="label">OPT</span>
+                </div>
+                <div class="func-btn" data-cmd="B">
+                    <span class="icon">􀊰</span>
+                    <span class="label">MENU</span>
+                </div>
+                <div class="func-btn" data-cmd="C">
+                    <span class="icon">􀍡</span>
+                    <span class="label">BACK</span>
+                </div>
+            </div>
+
+            <div class="output-display" id="outputDisplay">准备就绪</div>
+        </div>
+    </main>
+
+    <script>
+        // ==================== BLE 配置 (原逻辑保持不变) ====================
+        const BLE_CONFIG = {
+            SERVICE_1112_UUID: '00001112-0000-1000-8000-00805f9b34fb',
+            CHAR_4444_UUID: '00004444-0000-1000-8000-00805f9b34fb',
+            NAME_PREFIX: 'ESP_Web'
+        };
+
+        let bleDevice = null;
+        let bleServer = null;
+        let bleService = null;
+        let char4444 = null;
+        let isConnected = false;
+        let connectionMode = 'mqtt'; // 'mqtt' 或 'ble'
+
+        const backBtn = document.getElementById('backBtn');
+        const connBadge = document.getElementById('connBadge');
+        const connText = document.getElementById('connText');
+        const outputDisplay = document.getElementById('outputDisplay');
+        const allBtns = document.querySelectorAll('.direction-btn, .btn-center, .func-btn');
+        const modeMqtt = document.getElementById('modeMqtt');
+        const modeBle = document.getElementById('modeBle');
+
+        // ==================== 连接方式切换 ====================
+        modeMqtt.addEventListener('click', () => switchMode('mqtt'));
+        modeBle.addEventListener('click', () => switchMode('ble'));
+
+        function switchMode(mode) {
+            connectionMode = mode;
+
+            // 更新按钮状态
+            modeMqtt.classList.toggle('active', mode === 'mqtt');
+            modeBle.classList.toggle('active', mode === 'ble');
+
+            // 更新连接状态显示
+            if (mode === 'mqtt') {
+                if (mqttClient && mqttClient.connected) {
+                    connBadge.classList.add('connected');
+                    connText.textContent = 'MQTT 就绪';
+                } else {
+                    connBadge.classList.remove('connected');
+                    connText.textContent = 'MQTT 离线';
+                }
+            } else {
+                if (isConnected) {
+                    connBadge.classList.add('connected');
+                    connText.textContent = bleDevice ? bleDevice.name : '已连接';
+                } else {
+                    connBadge.classList.remove('connected');
+                    connText.textContent = '未连接蓝牙';
+                }
+            }
+
+            showOutput(`已切换到${mode === 'mqtt' ? 'MQTT' : '蓝牙'}模式`, true);
+        }
+
+        // ==================== 返回断开逻辑 ====================
+        backBtn.addEventListener('click', () => {
+            if (isConnected && bleDevice && bleDevice.gatt.connected) {
+                bleDevice.gatt.disconnect();
+            }
+            window.history.back();
+        });
+
+        // ==================== 蓝牙连接核心 ====================
+        async function connectBLE() {
+            try {
+                connText.textContent = '正在连接...';
+
+                bleDevice = await navigator.bluetooth.requestDevice({
+                    filters: [{ namePrefix: BLE_CONFIG.NAME_PREFIX }],
+                    optionalServices: [BLE_CONFIG.SERVICE_1112_UUID]
+                });
+
+                bleServer = await bleDevice.gatt.connect();
+                bleService = await bleServer.getPrimaryService(BLE_CONFIG.SERVICE_1112_UUID);
+                char4444 = await bleService.getCharacteristic(BLE_CONFIG.CHAR_4444_UUID);
+
+                isConnected = true;
+                // 只有在蓝牙模式下才更新状态显示
+                if (connectionMode === 'ble') {
+                    connBadge.classList.add('connected');
+                    connText.textContent = bleDevice.name || '已连接';
+                }
+                showOutput('已连接至眼镜', true);
+
+                bleDevice.addEventListener('gattserverdisconnected', () => {
+                    isConnected = false;
+                    char4444 = null;
+                    if (connectionMode === 'ble') {
+                        connBadge.classList.remove('connected');
+                        connText.textContent = '蓝牙已断开';
+                    }
+                    showOutput('蓝牙连接已断开', false);
+                });
+
+            } catch (error) {
+                connText.textContent = '未连接设备';
+                showOutput(error.message, false);
+            }
+        }
+
+        // ==================== 发送指令 ====================
+        async function sendCommand(cmd) {
+            // 震动反馈
+            if (navigator.vibrate) navigator.vibrate(15);
+
+            // 根据当前模式发送
+            if (connectionMode === 'ble') {
+                // 蓝牙模式
+                if (!isConnected || !char4444) {
+                    await connectBLE();
+                    if (!isConnected) return;
+                }
+
+                try {
+                    const encoder = new TextEncoder();
+                    await char4444.writeValue(encoder.encode(cmd));
+                    showOutput(`蓝牙: ${cmd}`, true);
+                } catch (error) {
+                    showOutput('蓝牙发送失败', false);
+                    if (error.message.includes('GATT') || error.message.includes('disconnect')) {
+                        isConnected = false;
+                        char4444 = null;
+                        connBadge.classList.remove('connected');
+                        connText.textContent = '连接丢失';
+                    }
+                }
+            } else {
+                // MQTT 模式
+                if (mqttClient && mqttClient.connected) {
+                    // 修复：直接发送纯字符串(cmd)，而不是 JSON 对象，确保匹配 C 代码逻辑
+                    mqttClient.publish(MQTT_CONTROL_TOPIC, cmd);
+                    showOutput(`MQTT: ${cmd}`, true);
+                    console.log(`[MQTT] ${MQTT_CONTROL_TOPIC}: ${cmd}`);
+                } else {
+                    showOutput('MQTT 未连接', false);
+                }
+            }
+        }
+
+        // ==================== 提示Toast逻辑 ====================
+        let outputTimeout;
+        function showOutput(text, success) {
+            outputDisplay.textContent = text;
+            outputDisplay.classList.add('active');
+            
+            clearTimeout(outputTimeout);
+            outputTimeout = setTimeout(() => {
+                outputDisplay.classList.remove('active');
+            }, 2000);
+        }
+
+        // ==================== 事件绑定 ====================
+        allBtns.forEach(btn => {
+            const cmd = btn.dataset.cmd;
+            // 处理点击与触摸
+            btn.addEventListener('pointerdown', (e) => {
+                e.preventDefault();
+                sendCommand(cmd);
+            });
+            // 阻止默认的长按菜单等行为
+            btn.addEventListener('contextmenu', e => e.preventDefault());
+        });
+
+        // ==================== 键盘映射 ====================
+        document.addEventListener('keydown', (e) => {
+            const keyMap = {
+                'ArrowUp': 'UP', 'ArrowDown': 'DOWN',
+                'ArrowLeft': 'LEFT', 'ArrowRight': 'RIGHT',
+                'Enter': 'OK', ' ': 'OK'
+            };
+
+            const cmd = keyMap[e.key];
+            if (cmd) {
+                e.preventDefault();
+                const btn = document.querySelector(`[data-cmd="${cmd}"]`);
+                if (btn) {
+                    // 模拟按压视觉效果
+                    btn.style.transform = btn.classList.contains('btn-center') ? 'translate(-50%, -50%) scale(0.94)' : 'scale(0.95)';
+                    setTimeout(() => btn.style.transform = '', 150);
+                    sendCommand(cmd);
+                }
+            }
+        });
+
+        // 检查蓝牙支持情况
+        if (!navigator.bluetooth) {
+            showOutput('当前环境不支持蓝牙 API', false);
+            allBtns.forEach(btn => btn.style.opacity = '0.3');
+        }
+
+        // ==================== 网页 MQTT 连接 ====================
+        const MQTT_BROKER = 'ws://124.220.224.189:8083/mqtt';
+        const MQTT_CONTROL_TOPIC = 'esp32/glass/control';
+
+        const mqttOptions = {
+            clientId: 'web_remote_' + Math.random().toString(16).substr(2, 8),
+            username: 'RUN',
+            password: '88888888',
+            clean: true
+        };
+
+        const mqttClient = mqtt.connect(MQTT_BROKER, mqttOptions);
+
+        mqttClient.on('connect', () => {
+            console.log('✅ 网页 MQTT 已连接');
+            // 如果当前是MQTT模式，更新状态显示
+            if (connectionMode === 'mqtt') {
+                connBadge.classList.add('connected');
+                connText.textContent = 'MQTT 就绪';
+            }
+        });
+
+        mqttClient.on('error', (err) => {
+            console.error('MQTT 连接错误:', err);
+            if (connectionMode === 'mqtt') {
+                connBadge.classList.remove('connected');
+                connText.textContent = 'MQTT 失败';
+            }
+        });
+
+        mqttClient.on('offline', () => {
+            console.log('⚠️ MQTT 已断开');
+            if (connectionMode === 'mqtt') {
+                connBadge.classList.remove('connected');
+                connText.textContent = 'MQTT 离线';
+            }
+        });
+
+        // 初始化：默认MQTT模式
+        switchMode('mqtt');
+    </script>
+</body>
+</html>

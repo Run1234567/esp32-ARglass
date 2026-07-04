@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AR GLASS</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            min-height: 100vh;
+            min-height: 100dvh;
+            background: #000;
+            overflow: hidden;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            color: #fff;
+            touch-action: none;
+        }
+
+        canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+        }
+
+        #bg { z-index: 1; }
+        #main { z-index: 2; }
+        #fx { z-index: 3; }
+        #transition { z-index: 50; pointer-events: none; }
+
+        /* ========== 首页内容 ========== */
+        .home {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            transition: opacity 0.5s ease, transform 0.5s ease, filter 0.5s ease;
+        }
+
+        .home.leaving {
+            opacity: 0;
+            transform: scale(0.8);
+            filter: blur(20px);
+        }
+
+        .title {
+            font-size: clamp(3.5rem, 12vw, 8rem);
+            font-weight: 900;
+            letter-spacing: -0.02em;
+            background: linear-gradient(135deg, #0ff 0%, #f0f 50%, #0ff 100%);
+            background-size: 300% 300%;
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: shimmer 3s ease infinite;
+            filter: drop-shadow(0 0 30px rgba(0, 255, 255, 0.3));
+            position: relative;
+        }
+
+        .title::before,
+        .title::after {
+            content: 'AR GLASS';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: inherit;
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .title::before {
+            animation: glitch1 0.4s infinite;
+            filter: drop-shadow(2px 0 #f0f);
+        }
+
+        .title::after {
+            animation: glitch2 0.4s infinite;
+            filter: drop-shadow(-2px 0 #0ff);
+        }
+
+        @keyframes shimmer {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+
+        @keyframes glitch1 {
+            0%, 100% { clip-path: inset(0 0 0 0); }
+            20% { clip-path: inset(15% 0 65% 0); transform: translate(-4px, 0); }
+            40% { clip-path: inset(45% 0 25% 0); transform: translate(4px, 0); }
+            60% { clip-path: inset(65% 0 10% 0); transform: translate(-2px, 0); }
+            80% { clip-path: inset(10% 0 75% 0); transform: translate(2px, 0); }
+        }
+
+        @keyframes glitch2 {
+            0%, 100% { clip-path: inset(0 0 0 0); }
+            20% { clip-path: inset(65% 0 15% 0); transform: translate(4px, 0); }
+            40% { clip-path: inset(10% 0 55% 0); transform: translate(-4px, 0); }
+            60% { clip-path: inset(35% 0 35% 0); transform: translate(2px, 0); }
+            80% { clip-path: inset(75% 0 5% 0); transform: translate(-2px, 0); }
+        }
+
+        .subtitle {
+            font-size: clamp(0.6rem, 1.5vw, 0.8rem);
+            letter-spacing: 0.8em;
+            color: rgba(255, 255, 255, 0.3);
+            margin-top: 2rem;
+        }
+
+        .tap-hint {
+            margin-top: 4rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+            animation: fadeIn 2s ease 1s both;
+        }
+
+        .tap-hint-text {
+            font-size: 0.7rem;
+            letter-spacing: 0.3em;
+            color: rgba(255, 255, 255, 0.4);
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        .tap-hint-icon {
+            width: 30px;
+            height: 50px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 15px;
+            position: relative;
+        }
+
+        .tap-hint-icon::before {
+            content: '';
+            position: absolute;
+            top: 8px;
+            left: 50%;
+            width: 4px;
+            height: 8px;
+            background: rgba(0, 255, 255, 0.6);
+            border-radius: 2px;
+            transform: translateX(-50%);
+            animation: scrollDot 2s ease-in-out infinite;
+        }
+
+        @keyframes scrollDot {
+            0%, 100% { top: 8px; opacity: 1; }
+            50% { top: 30px; opacity: 0.3; }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.4; }
+            50% { opacity: 0.8; }
+        }
+
+        /* ========== 转场粒子 ========== */
+        .transition-particles {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 45;
+            pointer-events: none;
+        }
+
+        /* ========== 加载动画 ========== */
+        .loader {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 1.5rem;
+            transition: opacity 1s ease, visibility 1s ease;
+        }
+
+        .loader.hidden {
+            opacity: 0;
+            visibility: hidden;
+        }
+
+        .loader-ring {
+            width: 50px;
+            height: 50px;
+            border: 2px solid transparent;
+            border-top-color: #0ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        .loader-text {
+            font-size: 0.7rem;
+            letter-spacing: 0.3em;
+            color: rgba(255, 255, 255, 0.4);
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <!-- 加载动画 -->
+    <div class="loader" id="loader">
+        <div class="loader-ring"></div>
+        <div class="loader-text">INITIALIZING</div>
+    </div>
+
+    <!-- 画布层 -->
+    <canvas id="bg"></canvas>
+    <canvas id="main"></canvas>
+    <canvas id="fx"></canvas>
+    <canvas id="transition"></canvas>
+
+    <!-- 首页 -->
+    <div class="home" id="home">
+        <h1 class="title">AR GLASS</h1>
+        <p class="subtitle">NEXT GENERATION</p>
+        <div class="tap-hint">
+            <div class="tap-hint-icon"></div>
+            <div class="tap-hint-text">点击进入菜单</div>
+        </div>
+    </div>
+
+    <script>
+        // ==================== 配置 ====================
+        const C = {
+            cyan: [0, 255, 255],
+            magenta: [255, 0, 255],
+            green: [0, 255, 128],
+            yellow: [255, 255, 0],
+            orange: [255, 128, 0],
+            purple: [128, 0, 255]
+        };
+
+        const COLORS = [C.cyan, C.magenta, C.green, C.yellow, C.orange, C.purple];
+
+        // ==================== 工具 ====================
+        const U = {
+            rand: (a, b) => Math.random() * (b - a) + a,
+            randInt: (a, b) => Math.floor(U.rand(a, b + 1)),
+            rgba: (c, a) => `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${a})`,
+            randColor: () => COLORS[U.randInt(0, COLORS.length - 1)]
+        };
+
+        // ==================== 画布管理 ====================
+        class CanvasManager {
+            constructor() {
+                this.canvases = {};
+                this.contexts = {};
+                this.width = window.innerWidth;
+                this.height = window.innerHeight;
+                this.cx = this.width / 2;
+                this.cy = this.height / 2;
+
+                ['bg', 'main', 'fx', 'transition'].forEach(id => {
+                    const canvas = document.getElementById(id);
+                    canvas.width = this.width;
+                    canvas.height = this.height;
+                    this.canvases[id] = canvas;
+                    this.contexts[id] = canvas.getContext('2d');
+                });
+
+                window.addEventListener('resize', () => this.resize());
+            }
+
+            resize() {
+                this.width = window.innerWidth;
+                this.height = window.innerHeight;
+                this.cx = this.width / 2;
+                this.cy = this.height / 2;
+
+                Object.values(this.canvases).forEach(canvas => {
+                    canvas.width = this.width;
+                    canvas.height = this.height;
+                });
+            }
+
+            clear(id, alpha = 1) {
+                if (alpha < 1) {
+                    this.contexts[id].fillStyle = `rgba(0, 0, 0, ${alpha})`;
+                    this.contexts[id].fillRect(0, 0, this.width, this.height);
+                } else {
+                    this.contexts[id].clearRect(0, 0, this.width, this.height);
+                }
+            }
+        }
+
+        // ==================== 触摸管理 ====================
+        class InputManager {
+            constructor() {
+                this.x = null;
+                this.y = null;
+
+                window.addEventListener('mousemove', (e) => {
+                    this.x = e.clientX;
+                    this.y = e.clientY;
+                });
+
+                window.addEventListener('touchmove', (e) => {
+                    const touch = e.touches[0];
+                    this.x = touch.clientX;
+                    this.y = touch.clientY;
+                }, { passive: true });
+
+                window.addEventListener('mouseout', () => this.x = null);
+                window.addEventListener('touchend', () => this.x = null);
+            }
+        }
+
+        // ==================== 粒子系统 ====================
+        class Particle {
+            constructor(x, y, config = {}) {
+                this.x = x ?? U.rand(0, canvasMgr.width);
+                this.y = y ?? U.rand(0, canvasMgr.height);
+                this.vx = config.vx ?? U.rand(-0.5, 0.5);
+                this.vy = config.vy ?? U.rand(-0.5, 0.5);
+                this.size = config.size ?? U.rand(0.5, 2);
+                this.color = config.color ?? U.randColor();
+                this.life = 1;
+                this.decay = config.decay ?? U.rand(0.0005, 0.001);
+                this.trail = [];
+                this.maxTrail = config.trail ?? 3;
+            }
+
+            update() {
+                this.trail.push({ x: this.x, y: this.y });
+                if (this.trail.length > this.maxTrail) this.trail.shift();
+
+                this.x += this.vx;
+                this.y += this.vy;
+                this.life -= this.decay;
+
+                if (input.x !== null) {
+                    const dx = this.x - input.x;
+                    const dy = this.y - input.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < 120) {
+                        const force = (120 - dist) / 120;
+                        this.x += (dx / dist) * force * 2;
+                        this.y += (dy / dist) * force * 2;
+                    }
+                }
+
+                return this.life > 0;
+            }
+
+            draw(ctx) {
+                if (this.trail.length > 1) {
+                    ctx.beginPath();
+                    ctx.moveTo(this.trail[0].x, this.trail[0].y);
+                    for (let i = 1; i < this.trail.length; i++) {
+                        ctx.lineTo(this.trail[i].x, this.trail[i].y);
+                    }
+                    ctx.strokeStyle = U.rgba(this.color, this.life * 0.2);
+                    ctx.lineWidth = this.size * 0.5;
+                    ctx.stroke();
+                }
+
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size * this.life, 0, Math.PI * 2);
+                ctx.fillStyle = U.rgba(this.color, this.life * 0.8);
+                ctx.fill();
+
+                const g = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size * 4);
+                g.addColorStop(0, U.rgba(this.color, 0.3 * this.life));
+                g.addColorStop(1, 'transparent');
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size * 4, 0, Math.PI * 2);
+                ctx.fillStyle = g;
+                ctx.fill();
+            }
+        }
+
+        class ParticleSystem {
+            constructor(count = 80) {
+                this.particles = [];
+                this.count = count;
+                for (let i = 0; i < count; i++) this.particles.push(new Particle());
+            }
+
+            update(ctx) {
+                this.particles = this.particles.filter(p => {
+                    const alive = p.update();
+                    if (alive) p.draw(ctx);
+                    return alive;
+                });
+                while (this.particles.length < this.count) this.particles.push(new Particle());
+            }
+
+            explode(x, y, count = 30) {
+                for (let i = 0; i < count; i++) {
+                    const angle = (Math.PI * 2 / count) * i;
+                    const speed = U.rand(3, 8);
+                    this.particles.push(new Particle(x, y, {
+                        vx: Math.cos(angle) * speed,
+                        vy: Math.sin(angle) * speed,
+                        size: U.rand(1, 3),
+                        decay: U.rand(0.008, 0.015),
+                        trail: 8
+                    }));
+                }
+            }
+        }
+
+        // ==================== 轨道系统 ====================
+        class OrbitSystem {
+            constructor() {
+                this.rings = [
+                    { radius: 80, dots: 3, speed: 0.006, color: C.cyan },
+                    { radius: 120, dots: 4, speed: -0.004, color: C.magenta },
+                    { radius: 170, dots: 5, speed: 0.003, color: C.green },
+                    { radius: 230, dots: 6, speed: -0.002, color: C.yellow }
+                ];
+                this.angles = this.rings.map(() => U.rand(0, Math.PI * 2));
+                this.trails = this.rings.map(() => []);
+            }
+
+            update(ctx) {
+                const t = Date.now() * 0.001;
+                this.rings.forEach((ring, ri) => {
+                    ctx.beginPath();
+                    ctx.arc(canvasMgr.cx, canvasMgr.cy, ring.radius, 0, Math.PI * 2);
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.02)';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+
+                    this.angles[ri] += ring.speed;
+
+                    for (let i = 0; i < ring.dots; i++) {
+                        const angle = this.angles[ri] + (Math.PI * 2 / ring.dots) * i;
+                        const x = canvasMgr.cx + Math.cos(angle) * ring.radius;
+                        const y = canvasMgr.cy + Math.sin(angle) * ring.radius;
+
+                        if (!this.trails[ri][i]) this.trails[ri][i] = [];
+                        this.trails[ri][i].push({ x, y });
+                        if (this.trails[ri][i].length > 10) this.trails[ri][i].shift();
+
+                        ctx.beginPath();
+                        ctx.moveTo(this.trails[ri][i][0].x, this.trails[ri][i][0].y);
+                        for (let j = 1; j < this.trails[ri][i].length; j++) {
+                            ctx.lineTo(this.trails[ri][i][j].x, this.trails[ri][i][j].y);
+                        }
+                        ctx.strokeStyle = U.rgba(ring.color, 0.2);
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+
+                        const size = 2 + Math.sin(t * 2 + i) * 1;
+                        ctx.beginPath();
+                        ctx.arc(x, y, size, 0, Math.PI * 2);
+                        ctx.fillStyle = U.rgba(ring.color, 0.8);
+                        ctx.fill();
+
+                        const g = ctx.createRadialGradient(x, y, 0, x, y, size * 4);
+                        g.addColorStop(0, U.rgba(ring.color, 0.3));
+                        g.addColorStop(1, 'transparent');
+                        ctx.beginPath();
+                        ctx.arc(x, y, size * 4, 0, Math.PI * 2);
+                        ctx.fillStyle = g;
+                        ctx.fill();
+                    }
+                });
+            }
+        }
+
+        // ==================== 激光系统 ====================
+        class LaserSystem {
+            constructor(count = 8) {
+                this.lasers = [];
+                for (let i = 0; i < count; i++) {
+                    this.lasers.push({
+                        angle: U.rand(0, Math.PI * 2),
+                        speed: U.rand(-0.003, 0.003),
+                        length: U.rand(80, 200),
+                        color: U.randColor(),
+                        opacity: U.rand(0.05, 0.15),
+                        pulse: U.rand(0, Math.PI * 2)
+                    });
+                }
+            }
+
+            update(ctx) {
+                this.lasers.forEach(l => {
+                    l.angle += l.speed;
+                    l.pulse += 0.05;
+                    const opacity = l.opacity * (0.5 + Math.sin(l.pulse) * 0.5);
+                    const startR = 40;
+                    const endR = startR + l.length;
+
+                    const x1 = canvasMgr.cx + Math.cos(l.angle) * startR;
+                    const y1 = canvasMgr.cy + Math.sin(l.angle) * startR;
+                    const x2 = canvasMgr.cx + Math.cos(l.angle) * endR;
+                    const y2 = canvasMgr.cy + Math.sin(l.angle) * endR;
+
+                    ctx.beginPath();
+                    ctx.moveTo(x1, y1);
+                    ctx.lineTo(x2, y2);
+                    ctx.strokeStyle = U.rgba(l.color, opacity);
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+
+                    ctx.beginPath();
+                    ctx.moveTo(x1, y1);
+                    ctx.lineTo(x2, y2);
+                    ctx.strokeStyle = U.rgba(l.color, opacity * 0.3);
+                    ctx.lineWidth = 4;
+                    ctx.stroke();
+                });
+            }
+        }
+
+        // ==================== 能量波纹 ====================
+        class EnergyWaveSystem {
+            constructor() {
+                this.waves = [];
+                this.timer = 0;
+            }
+
+            update(ctx) {
+                this.timer++;
+                if (this.timer % 90 === 0) {
+                    this.waves.push({
+                        radius: 0,
+                        maxRadius: U.rand(150, 300),
+                        speed: U.rand(1, 2),
+                        color: U.randColor(),
+                        opacity: 0.3,
+                        sides: U.randInt(4, 8),
+                        rotation: U.rand(0, Math.PI * 2)
+                    });
+                }
+
+                this.waves = this.waves.filter(w => {
+                    w.radius += w.speed;
+                    w.rotation += 0.005;
+                    w.opacity = 0.3 * (1 - w.radius / w.maxRadius);
+                    if (w.opacity <= 0) return false;
+
+                    ctx.save();
+                    ctx.translate(canvasMgr.cx, canvasMgr.cy);
+                    ctx.rotate(w.rotation);
+
+                    ctx.beginPath();
+                    for (let i = 0; i <= w.sides; i++) {
+                        const angle = (Math.PI * 2 / w.sides) * i;
+                        const x = Math.cos(angle) * w.radius;
+                        const y = Math.sin(angle) * w.radius;
+                        if (i === 0) ctx.moveTo(x, y);
+                        else ctx.lineTo(x, y);
+                    }
+                    ctx.closePath();
+                    ctx.strokeStyle = U.rgba(w.color, w.opacity);
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+
+                    ctx.restore();
+                    return true;
+                });
+            }
+        }
+
+        // ==================== 中心核心 ====================
+        function drawCenterCore(ctx) {
+            const t = Date.now() * 0.001;
+            const pulse = Math.sin(t * 2) * 0.3 + 0.7;
+
+            const g = ctx.createRadialGradient(canvasMgr.cx, canvasMgr.cy, 0, canvasMgr.cx, canvasMgr.cy, 60);
+            g.addColorStop(0, `rgba(0, 255, 255, ${0.1 * pulse})`);
+            g.addColorStop(0.5, `rgba(255, 0, 255, ${0.03 * pulse})`);
+            g.addColorStop(1, 'transparent');
+
+            ctx.beginPath();
+            ctx.arc(canvasMgr.cx, canvasMgr.cy, 60, 0, Math.PI * 2);
+            ctx.fillStyle = g;
+            ctx.fill();
+
+            const crossSize = 15;
+            ctx.beginPath();
+            ctx.moveTo(canvasMgr.cx - crossSize, canvasMgr.cy);
+            ctx.lineTo(canvasMgr.cx + crossSize, canvasMgr.cy);
+            ctx.moveTo(canvasMgr.cx, canvasMgr.cy - crossSize);
+            ctx.lineTo(canvasMgr.cx, canvasMgr.cy + crossSize);
+            ctx.strokeStyle = `rgba(0, 255, 255, ${0.2 * pulse})`;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        }
+
+        // ==================== 连线 ====================
+        function drawConnections(ctx, particles) {
+            const maxDist = 80;
+            for (let i = 0; i < particles.length; i++) {
+                for (let j = i + 1; j < particles.length; j++) {
+                    const dx = particles[i].x - particles[j].x;
+                    const dy = particles[i].y - particles[j].y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < maxDist) {
+                        const opacity = (1 - dist / maxDist) * 0.2 * particles[i].life * particles[j].life;
+                        ctx.beginPath();
+                        ctx.moveTo(particles[i].x, particles[i].y);
+                        ctx.lineTo(particles[j].x, particles[j].y);
+                        ctx.strokeStyle = `rgba(0, 255, 255, ${opacity})`;
+                        ctx.lineWidth = 0.5;
+                        ctx.stroke();
+                    }
+                }
+            }
+        }
+
+        // ==================== 转场动画系统 ====================
+        class TransitionSystem {
+            constructor() {
+                this.particles = [];
+                this.active = false;
+                this.phase = 0; // 0: 收集, 1: 爆炸, 2: 消散
+                this.progress = 0;
+            }
+
+            start(x, y) {
+                this.active = true;
+                this.phase = 0;
+                this.progress = 0;
+                this.particles = [];
+
+                // 生成从四周飞向中心的粒子
+                for (let i = 0; i < 100; i++) {
+                    const angle = U.rand(0, Math.PI * 2);
+                    const dist = U.rand(300, 600);
+                    const startX = x + Math.cos(angle) * dist;
+                    const startY = y + Math.sin(angle) * dist;
+
+                    this.particles.push({
+                        x: startX,
+                        y: startY,
+                        targetX: x,
+                        targetY: y,
+                        size: U.rand(2, 5),
+                        color: U.randColor(),
+                        speed: U.rand(0.02, 0.04),
+                        progress: 0,
+                        delay: U.rand(0, 0.3),
+                        phase: 'collect'
+                    });
+                }
+            }
+
+            update(ctx) {
+                if (!this.active) return false;
+
+                this.progress += 0.016;
+                let allDone = true;
+
+                this.particles.forEach(p => {
+                    if (p.phase === 'collect') {
+                        if (this.progress < p.delay) {
+                            allDone = false;
+                            return;
+                        }
+
+                        p.progress += p.speed;
+                        if (p.progress >= 1) {
+                            p.progress = 1;
+                            p.phase = 'explode';
+                            p.explodeAngle = U.rand(0, Math.PI * 2);
+                            p.explodeSpeed = U.rand(3, 10);
+                            p.life = 1;
+                        }
+
+                        p.x = U.lerp(p.x, p.targetX, p.progress);
+                        p.y = U.lerp(p.y, p.targetY, p.progress);
+                        allDone = false;
+
+                    } else if (p.phase === 'explode') {
+                        p.x += Math.cos(p.explodeAngle) * p.explodeSpeed;
+                        p.y += Math.sin(p.explodeAngle) * p.explodeSpeed;
+                        p.explodeSpeed *= 0.95;
+                        p.life -= 0.02;
+
+                        if (p.life <= 0) {
+                            p.phase = 'done';
+                        } else {
+                            allDone = false;
+                        }
+                    }
+
+                    // 绘制
+                    if (p.phase !== 'done') {
+                        const alpha = p.phase === 'collect' ? (1 - p.progress * 0.5) : p.life;
+
+                        // 发光
+                        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 5);
+                        g.addColorStop(0, U.rgba(p.color, 0.5 * alpha));
+                        g.addColorStop(1, 'transparent');
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y, p.size * 5, 0, Math.PI * 2);
+                        ctx.fillStyle = g;
+                        ctx.fill();
+
+                        // 粒子
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
+                        ctx.fillStyle = U.rgba(p.color, alpha);
+                        ctx.fill();
+                    }
+                });
+
+                if (allDone && this.progress > 0.5) {
+                    this.active = false;
+                    return true;
+                }
+
+                return false;
+            }
+        }
+
+        // ==================== 系统初始化 ====================
+        const canvasMgr = new CanvasManager();
+        const input = new InputManager();
+        const particles = new ParticleSystem(80);
+        const orbits = new OrbitSystem();
+        const lasers = new LaserSystem(8);
+        const energyWaves = new EnergyWaveSystem();
+        const transition = new TransitionSystem();
+
+        const home = document.getElementById('home');
+        let isOpening = false;
+
+        // ==================== 页面跳转 ====================
+        function goToLogin(x, y) {
+            if (isOpening) return;
+            isOpening = true;
+
+            // 启动转场动画
+            transition.start(x, y);
+
+            // 粒子爆炸
+            particles.explode(x, y, 50);
+
+            // 延迟后跳转到登录页
+            setTimeout(() => {
+                home.classList.add('leaving');
+            }, 200);
+
+            setTimeout(() => {
+                window.location.href = 'login.html';
+            }, 800);
+        }
+
+        // ==================== 事件监听 ====================
+        home.addEventListener('click', (e) => {
+            goToLogin(e.clientX, e.clientY);
+        });
+
+        home.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            const touch = e.changedTouches[0];
+            goToLogin(touch.clientX, touch.clientY);
+        });
+
+        // ==================== 动画循环 ====================
+        function animate() {
+            canvasMgr.clear('bg', 0.15);
+            canvasMgr.clear('main');
+            canvasMgr.clear('fx');
+            canvasMgr.clear('transition');
+
+            orbits.update(canvasMgr.contexts.main);
+            lasers.update(canvasMgr.contexts.main);
+            energyWaves.update(canvasMgr.contexts.main);
+            drawCenterCore(canvasMgr.contexts.main);
+
+            particles.update(canvasMgr.contexts.fx);
+            drawConnections(canvasMgr.contexts.fx, particles.particles);
+
+            transition.update(canvasMgr.contexts.transition);
+
+            requestAnimationFrame(animate);
+        }
+
+        // ==================== 启动 ====================
+        animate();
+
+        setTimeout(() => {
+            document.getElementById('loader').classList.add('hidden');
+        }, 1500);
+    </script>
+</body>
+</html>
