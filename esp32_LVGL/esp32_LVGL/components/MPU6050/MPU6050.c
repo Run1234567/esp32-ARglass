@@ -189,13 +189,12 @@ void read_mpu6050_task(void *pvParameters) {
             // 🚀 将读到的数据直接扔进解算器
             process_imu_data(accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z);
 
-            // 每隔一段时间打印一次算好的姿态，方便调试
-            static int print_count = 0;
-            if (++print_count >= 20) { 
-                ESP_LOGI(TAG, "Roll: %.1f | Pitch: %.1f | Yaw: %.1f", attitude.roll, attitude.pitch, attitude.yaw);
-                print_count = 0;
-            }
+            // static int print_count = 0;
+            // if (++print_count >= 20) { 
+            //     ESP_LOGI(TAG, "Roll: %.1f | Pitch: %.1f | Yaw: %.1f", attitude.roll, attitude.pitch, attitude.yaw);
+            //     print_count = 0;
+            // }
         }
-        vTaskDelay(pdMS_TO_TICKS(5)); // 解算频率提升至 200Hz (5ms)，对 Mahony 算法非常重要！
+        vTaskDelay(pdMS_TO_TICKS(10)); // 解算频率提升至 200Hz (5ms)，对 Mahony 算法非常重要！
     }
 }
