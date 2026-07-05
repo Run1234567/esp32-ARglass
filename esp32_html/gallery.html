@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>空间相册 - J.A.R.V.I.S</title>
+    <style>
+        :root {
+            --bg-color: #000000;
+            --surface-color: rgba(255, 255, 255, 0.03);
+            --surface-hover: rgba(255, 255, 255, 0.08);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --text-primary: #ffffff;
+            --text-secondary: rgba(255, 255, 255, 0.5);
+            --text-tertiary: rgba(255, 255, 255, 0.3);
+            --danger-color: #ff453a;
+            --danger-hover: rgba(255, 69, 58, 0.15);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+        }
+
+        body {
+            min-height: 100vh;
+            min-height: 100dvh;
+            background: var(--bg-color);
+            overflow-x: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: var(--text-primary);
+            color-scheme: dark;
+        }
+
+        /* ========== PC端高级滚动条 ========== */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 20px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        /* ========== 极简环境光 ========== */
+        .ambient-glow {
+            position: fixed;
+            top: -10%;
+            left: 50%;
+            width: 70vw;
+            height: 70vw;
+            transform: translateX(-50%);
+            background: radial-gradient(circle, rgba(255,255,255,0.03) 0%, transparent 60%);
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        /* ========== 顶部导航 ========== */
+        .header {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            padding: 1rem 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .header-title {
+            font-size: 1.05rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        .icon-btn {
+            width: 38px;
+            height: 38px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            color: var(--text-primary);
+        }
+
+        .icon-btn:hover { background: var(--surface-hover); }
+        .icon-btn:active { transform: scale(0.92); }
+        .icon-btn svg { width: 20px; height: 20px; stroke: currentColor; stroke-width: 2; }
+
+        .spin {
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+
+        /* ========== 主内容区 (大屏适配) ========== */
+        .content {
+            position: relative;
+            z-index: 1;
+            padding: 1.5rem;
+            max-width: 1600px; /* 极致宽屏适配 */
+            margin: 0 auto;
+        }
+
+        .section-title {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            margin-bottom: 1.5rem;
+            margin-left: 0.2rem;
+            animation: fadeInUp 0.5s ease both;
+        }
+
+        /* ========== 完美自适应照片墙网格 ========== */
+        .gallery-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr); /* 手机端默认两列 */
+            gap: 1rem;
+            animation: fadeInUp 0.6s ease 0.1s both;
+        }
+
+        /* 平板与大屏自适应断点 */
+        @media (min-width: 640px) { .gallery-grid { grid-template-columns: repeat(3, 1fr); gap: 1.2rem; } }
+        @media (min-width: 1024px) { 
+            .gallery-grid { grid-template-columns: repeat(4, 1fr); gap: 1.5rem; } 
+            .content { padding: 3rem 2rem; }
+        }
+        @media (min-width: 1440px) { .gallery-grid { grid-template-columns: repeat(5, 1fr); } }
+
+        /* ========== 照片卡片 ========== */
+        .photo-card {
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            animation: fadeInUp 0.5s ease backwards;
+            cursor: pointer;
+        }
+
+        /* PC端高级悬浮效果 */
+        @media (hover: hover) {
+            .photo-card:hover {
+                transform: translateY(-5px);
+                border-color: rgba(255, 255, 255, 0.15);
+                box-shadow: 0 15px 35px rgba(0, 0, 0, 0.4);
+            }
+            /* 鼠标滑过时，内部图片微微放大，极其丝滑 */
+            .photo-card:hover .photo-img {
+                transform: scale(1.05);
+            }
+        }
+
+        .photo-card:active { transform: scale(0.96); }
+
+        /* 图片容器，强制 4:3 黄金比例裁剪 */
+        .photo-img-wrapper {
+            width: 100%;
+            aspect-ratio: 4 / 3; 
+            overflow: hidden;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .photo-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+            pointer-events: none; /* 防止移动端长按弹出保存菜单 */
+        }
+
+        /* 底部信息栏 */
+        .photo-info {
+            padding: 0.8rem 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: transparent;
+        }
+
+        .photo-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 0.3rem;
+        }
+
+        .photo-title {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            letter-spacing: 0.5px;
+        }
+
+        .photo-time {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .delete-btn {
+            width: 32px;
+            height: 32px;
+            background: transparent;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            color: var(--text-tertiary);
+            transition: all 0.2s ease;
+        }
+
+        @media (hover: hover) {
+            .delete-btn:hover {
+                background: var(--danger-hover);
+                color: var(--danger-color);
+            }
+        }
+
+        .delete-btn:active {
+            transform: scale(0.9);
+            background: rgba(255, 69, 58, 0.3);
+            color: #fff;
+        }
+
+        .delete-btn svg {
+            width: 16px;
+            height: 16px;
+            stroke: currentColor;
+            stroke-width: 2;
+        }
+
+        .status-msg {
+            grid-column: 1 / -1; /* 在网格中横跨全部列以居中 */
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            padding: 5rem 1rem;
+            display: none; /* 默认隐藏，由JS控制 */
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+            animation: fadeInUp 0.5s ease both;
+        }
+
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(15px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* ========== 画廊级沉浸式大图 Modal ========== */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(25px);
+            -webkit-backdrop-filter: blur(25px);
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .modal-content {
+            width: 95%;
+            max-width: 1200px; /* 电脑端极尽放大 */
+            border-radius: 20px;
+            padding: 1.5rem;
+            transform: scale(0.95) translateY(10px);
+            transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .modal-overlay.active .modal-content {
+            transform: scale(1) translateY(0);
+        }
+
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .modal-close {
+            width: 36px;
+            height: 36px;
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .modal-close:hover { background: rgba(255,255,255,0.1); }
+        .modal-close:active { transform: scale(0.9); }
+        .modal-close svg { width: 18px; height: 18px; stroke: var(--text-primary); }
+
+        .modal-body {
+            width: 100%;
+            display: flex;
+            justify-content: center;
+        }
+
+        .modal-body img {
+            width: 100%;
+            max-height: 80vh; /* 确保超大屏也不会突破屏幕 */
+            object-fit: contain;
+            border-radius: 12px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+        }
+    </style>
+</head>
+<body>
+
+    <script>
+        if (sessionStorage.getItem('isLoggedIn') !== 'true') {
+            window.location.replace('login.html'); 
+        }
+    </script>
+
+    <div class="ambient-glow"></div>
+
+    <header class="header">
+        <button class="icon-btn" onclick="window.history.back()" title="返回">
+            <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="15 18 9 12 15 6"></polyline>
+            </svg>
+        </button>
+
+        <div class="header-title">云端影像空间</div>
+
+        <button class="icon-btn" id="refreshBtn" onclick="fetchPhotos()" title="同步图库">
+            <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+            </svg>
+        </button>
+    </header>
+
+    <main class="content">
+        <div class="section-title">全景档案</div>
+
+        <div id="statusMsg" class="status-msg">正在同步云端影像数据...</div>
+
+        <div class="gallery-grid" id="galleryContainer"></div>
+    </main>
+
+    <div class="modal-overlay" id="imageModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="header-title" style="font-size: 1rem; color: var(--text-secondary);" id="modalPhotoTitle">影像预览</div>
+                <div class="modal-close" id="closeModalBtn" title="关闭">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </div>
+            </div>
+            <div class="modal-body">
+                <img id="fullImage" src="" alt="Full Preview">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 工具：格式化文件大小
+        function formatBytes(bytes) {
+            if (!bytes || bytes === 0) return '未知大小';
+            const k = 1024, sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // DOM 元素
+        const container = document.getElementById('galleryContainer');
+        const statusMsg = document.getElementById('statusMsg');
+        const refreshBtn = document.getElementById('refreshBtn');
+        const imageModal = document.getElementById('imageModal');
+        const fullImage = document.getElementById('fullImage');
+        const modalPhotoTitle = document.getElementById('modalPhotoTitle');
+        const closeModalBtn = document.getElementById('closeModalBtn');
+
+        // 拉取照片数据核心逻辑 (原封不动)
+        async function fetchPhotos() {
+            // 给刷新按钮加动画
+            const svgIcon = refreshBtn.querySelector('svg');
+            svgIcon.classList.add('spin');
+            
+            container.innerHTML = '';
+            statusMsg.style.display = 'flex';
+            statusMsg.innerText = '正在高速同步数据...';
+
+            try {
+                const response = await fetch('/api/get_photos');
+                const res = await response.json();
+
+                if (res.status === 'success') {
+                    if (!res.data || res.data.length === 0) {
+                        statusMsg.innerText = '档案库为空，快用 J.A.R.V.I.S 拍一张吧！';
+                    } else {
+                        statusMsg.style.display = 'none';
+                        // 动态生成卡片并注入网格
+                        res.data.forEach((photo, index) => {
+                            // 让每张卡片产生轻微的时间差，形成流水线渐显动画
+                            const delay = index * 0.04; 
+                            const cardHtml = `
+                                <div class="photo-card" style="animation-delay: ${delay}s">
+                                    <div class="photo-img-wrapper" onclick="openModal('${photo.file_path}', ${photo.id})">
+                                        <img class="photo-img" src="${photo.file_path}" alt="Image ${photo.id}">
+                                    </div>
+                                    <div class="photo-info">
+                                        <div class="photo-meta">
+                                            <div class="photo-title">影像 #${photo.id}</div>
+                                            <div class="photo-time">${formatBytes(photo.file_size)} · ${photo.created_at.split(' ')[0]}</div>
+                                        </div>
+                                        <div class="delete-btn" onclick="deletePhoto(${photo.id})" title="永久删除">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                                                <path d="M3 6h18"></path>
+                                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                            </svg>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                            container.innerHTML += cardHtml;
+                        });
+                    }
+                } else {
+                    statusMsg.innerText = '加载失败: ' + res.message;
+                }
+            } catch (error) {
+                statusMsg.innerText = '无法连接到服务器集群，请检查网络。';
+            }
+
+            // 恢复刷新按钮
+            setTimeout(() => { svgIcon.classList.remove('spin'); }, 800);
+        }
+
+        // 彻底删除照片逻辑 (原封不动)
+        async function deletePhoto(id) {
+            // 阻止事件冒泡防止触发图片预览
+            if (event) event.stopPropagation();
+            
+            if (!confirm(`警告：确定要彻底删除影像 #${id} 吗？\\n此操作不可逆！`)) return;
+
+            try {
+                const response = await fetch(`/api/delete_photo/${id}`, { method: 'POST' });
+                const res = await response.json();
+                if (res.status === 'success') {
+                    fetchPhotos(); // 成功后刷新图库网格
+                } else {
+                    alert('删除失败: ' + res.message);
+                }
+            } catch (error) {
+                alert('网络层请求错误: ' + error);
+            }
+        }
+
+        // 打开大图预览 Modal
+        function openModal(imgSrc, id) {
+            fullImage.src = imgSrc;
+            modalPhotoTitle.innerText = `影像 #${id}`;
+            imageModal.classList.add('active');
+        }
+
+        // 关闭弹窗并释放资源
+        function closeModal() {
+            imageModal.classList.remove('active');
+            setTimeout(() => { fullImage.src = ''; }, 400); // 配合 CSS 动画延迟清空
+        }
+
+        // 绑定 Modal 关闭事件
+        closeModalBtn.addEventListener('click', closeModal);
+        imageModal.addEventListener('click', (e) => {
+            if (e.target === imageModal) closeModal();
+        });
+
+        // 页面启动时自动拉取
+        window.addEventListener('DOMContentLoaded', fetchPhotos);
+    </script>
+</body>
+</html>

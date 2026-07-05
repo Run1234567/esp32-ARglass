@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>遥控器 - AR GLASS</title>
+    <title>遥控中枢 - J.A.R.V.I.S</title>
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <style>
         :root {
@@ -13,519 +13,355 @@
             --border-color: rgba(255, 255, 255, 0.08);
             --text-primary: #ffffff;
             --text-secondary: rgba(255, 255, 255, 0.5);
-            --accent-color: #ffffff;
-            --success-color: #34C759; /* Apple Green */
+            --text-tertiary: rgba(255, 255, 255, 0.3);
+            --success-color: #32d74b;
+            --danger-color: #ff453a;
+            --warning-color: #ffd60a;
+            --info-color: #0a84ff;
         }
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            -webkit-tap-highlight-color: transparent;
-            user-select: none;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+
+        /* PC端高科技滚动条 */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.3); }
 
         body {
-            min-height: 100vh;
-            min-height: 100dvh;
             background: var(--bg-color);
-            overflow: hidden;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             color: var(--text-primary);
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            min-height: 100vh;
+            overflow-x: hidden;
+            color-scheme: dark;
         }
 
-        /* ========== 高级环境光背景 ========== */
+        /* 环境光 */
         .ambient-glow {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            width: 80vw;
-            height: 80vw;
+            position: fixed; top: 30%; left: 50%; width: 90vw; height: 90vw;
             transform: translate(-50%, -50%);
-            background: radial-gradient(circle, rgba(255,255,255,0.06) 0%, transparent 60%);
-            z-index: 0;
-            pointer-events: none;
-            transition: all 0.5s ease;
+            background: radial-gradient(circle, rgba(255,255,255,0.04) 0%, transparent 60%);
+            z-index: 0; pointer-events: none; transition: all 0.5s ease;
         }
 
-        /* ========== 头部 (灵动岛风格) ========== */
+        /* ========== 头部导航 ========== */
         .header {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            z-index: 100;
-            padding: 1.5rem;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
+            position: sticky; top: 0; left: 0; width: 100%; z-index: 100;
+            padding: 1rem 1.5rem; display: flex; align-items: center; justify-content: space-between;
+            background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border-color);
         }
 
         .back-btn {
-            width: 44px;
-            height: 44px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: transparent;
-            border-radius: 50%;
-            cursor: pointer;
-            transition: background 0.3s ease;
+            width: 38px; height: 38px; display: flex; align-items: center; justify-content: center;
+            background: transparent; border-radius: 50%; cursor: pointer; transition: background 0.3s ease;
         }
-
-        .back-btn:active {
-            background: var(--surface-hover);
-        }
-
-        .back-btn svg {
-            width: 20px;
-            height: 20px;
-            stroke: var(--text-primary);
-        }
+        .back-btn:active { background: var(--surface-hover); }
+        .back-btn svg { width: 22px; height: 22px; stroke: var(--text-primary); stroke-width: 1.5; }
 
         .connection-badge {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.5rem 1rem;
-            background: var(--surface-color);
-            border: 1px solid var(--border-color);
-            border-radius: 30px;
-            font-size: 0.8rem;
-            font-weight: 500;
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex; align-items: center; gap: 6px; padding: 6px 12px;
+            background: var(--surface-color); border: 1px solid var(--border-color);
+            border-radius: 30px; font-size: 0.8rem; font-weight: 500;
+            transition: all 0.4s ease;
+        }
+        .connection-badge.connected { border-color: rgba(50, 215, 75, 0.3); background: rgba(50, 215, 75, 0.1); }
+        .badge-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--danger-color); transition: background 0.3s ease; }
+        .connection-badge.connected .badge-dot { background: var(--success-color); box-shadow: 0 0 8px rgba(50, 215, 75, 0.5); }
+
+        /* ========== 主布局 (Dashboard) ========== */
+        .dashboard {
+            position: relative; z-index: 10;
+            display: flex; flex-direction: column; align-items: center;
+            padding: 2rem 1.5rem 4rem; gap: 3rem; max-width: 1400px; margin: 0 auto;
         }
 
-        .connection-badge.connected {
-            border-color: rgba(52, 199, 89, 0.3);
-            background: rgba(52, 199, 89, 0.1);
+        /* ----- 左侧：遥控器面板 ----- */
+        .panel-remote {
+            display: flex; flex-direction: column; align-items: center; gap: 2rem;
+            width: 100%; max-width: 340px;
         }
 
-        .badge-dot {
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: var(--text-secondary);
-            transition: background 0.3s ease;
-        }
-
-        .connection-badge.connected .badge-dot {
-            background: var(--success-color);
-            box-shadow: 0 0 10px rgba(52, 199, 89, 0.5);
-        }
-
-        /* ========== 连接方式选择器 ========== */
+        /* 模式选择器 */
         .mode-selector {
-            position: fixed;
-            top: 75px;
-            left: 50%;
-            transform: translateX(-50%);
-            display: flex;
-            gap: 0.5rem;
-            z-index: 100;
-            background: rgba(30, 30, 30, 0.8);
-            padding: 0.3rem;
-            border-radius: 12px;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
+            display: flex; gap: 0.5rem; background: rgba(30, 30, 30, 0.6);
+            padding: 0.3rem; border-radius: 12px; border: 1px solid var(--border-color);
         }
-
         .mode-btn {
-            display: flex;
-            align-items: center;
-            gap: 0.4rem;
-            padding: 0.5rem 1rem;
-            border-radius: 9px;
-            font-size: 0.8rem;
-            font-weight: 500;
-            color: rgba(255, 255, 255, 0.5);
-            cursor: pointer;
-            transition: all 0.3s ease;
-            border: 1px solid transparent;
+            display: flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1.2rem;
+            border-radius: 9px; font-size: 0.8rem; font-weight: 500; color: var(--text-secondary);
+            cursor: pointer; transition: all 0.3s ease; border: 1px solid transparent;
         }
+        .mode-btn.active { color: #fff; background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.15); box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
+        .mode-btn svg { width: 16px; height: 16px; stroke: currentColor; }
 
-        .mode-btn.active {
-            color: #fff;
-            background: rgba(10, 132, 255, 0.3);
-            border-color: rgba(10, 132, 255, 0.4);
-        }
-
-        .mode-btn svg {
-            stroke: currentColor;
-        }
-
-        /* ========== 主容器 ========== */
-        .container {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            z-index: 10;
-            padding-top: 20px;
-        }
-
-        /* ========== 一体化触控盘 (Apple TV 风格) ========== */
+        /* Apple TV 风触控盘 */
         .remote-wrapper {
-            position: relative;
-            width: 280px;
-            height: 280px;
-            background: rgba(20, 20, 20, 0.6);
-            border: 1px solid var(--border-color);
-            border-radius: 50%;
-            box-shadow: 
-                0 20px 40px rgba(0, 0, 0, 0.5),
-                inset 0 1px 0 rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(30px);
-            -webkit-backdrop-filter: blur(30px);
-            overflow: hidden;
+            position: relative; width: 280px; height: 280px;
+            background: rgba(25, 25, 25, 0.8); border: 1px solid var(--border-color);
+            border-radius: 50%; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px); overflow: hidden;
             transition: all 0.3s ease;
         }
-
-        /* 细微的十字分割线 */
-        .remote-wrapper::before,
-        .remote-wrapper::after {
-            content: '';
-            position: absolute;
-            background: rgba(255, 255, 255, 0.03);
-            z-index: 1;
-            pointer-events: none;
-        }
+        .remote-wrapper::before, .remote-wrapper::after { content: ''; position: absolute; background: rgba(255, 255, 255, 0.03); z-index: 1; pointer-events: none; }
         .remote-wrapper::before { top: 0; bottom: 0; left: 50%; width: 1px; }
         .remote-wrapper::after { left: 0; right: 0; top: 50%; height: 1px; }
 
-        .direction-btn {
-            position: absolute;
-            width: 50%;
-            height: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: background 0.2s ease;
-            z-index: 2;
-        }
-
-        .direction-btn:active {
-            background: rgba(255, 255, 255, 0.08);
-        }
-
-        .direction-btn svg {
-            width: 22px;
-            height: 22px;
-            stroke: var(--text-secondary);
-            transition: stroke 0.2s ease, transform 0.2s ease;
-        }
-
-        .direction-btn:active svg {
-            stroke: var(--text-primary);
-            transform: scale(1.1);
-        }
-
-        /* 方向键定位 */
+        .direction-btn { position: absolute; width: 50%; height: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.2s ease; z-index: 2; }
+        .direction-btn:active { background: rgba(255, 255, 255, 0.08); }
+        .direction-btn svg { width: 22px; height: 22px; stroke: var(--text-secondary); transition: all 0.2s ease; }
+        .direction-btn:active svg { stroke: var(--text-primary); transform: scale(1.1); }
         .btn-up { top: 0; left: 25%; width: 50%; align-items: flex-start; padding-top: 25px; }
         .btn-down { bottom: 0; left: 25%; width: 50%; align-items: flex-end; padding-bottom: 25px; }
         .btn-left { left: 0; top: 25%; height: 50%; justify-content: flex-start; padding-left: 25px; }
         .btn-right { right: 0; top: 25%; height: 50%; justify-content: flex-end; padding-right: 25px; }
 
-        /* 中心确认键 */
-        .btn-center {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 110px;
-            height: 110px;
-            background: #1a1a1a;
-            border-radius: 50%;
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.4);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            z-index: 10;
-            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-        }
+        .btn-center { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 100px; height: 100px; background: #1a1a1a; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.05); box-shadow: 0 10px 20px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10; transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
+        .btn-center:active { transform: translate(-50%, -50%) scale(0.92); background: #252525; box-shadow: 0 5px 10px rgba(0,0,0,0.4); }
+        .btn-center-icon { font-size: 0.95rem; font-weight: 600; letter-spacing: 1px; color: var(--text-primary); }
 
-        .btn-center:active {
-            transform: translate(-50%, -50%) scale(0.94);
-            background: #252525;
-            box-shadow: 0 5px 10px rgba(0, 0, 0, 0.4);
-        }
+        .func-buttons { display: flex; gap: 1.5rem; }
+        .func-btn { width: 60px; height: 60px; border-radius: 30px; background: var(--surface-color); border: 1px solid var(--border-color); display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s ease; }
+        .func-btn:active { transform: scale(0.9); background: var(--surface-hover); }
+        .func-btn .icon { font-size: 1.2rem; margin-bottom: 2px; }
+        .func-btn .label { font-size: 0.6rem; font-weight: 500; color: var(--text-secondary); }
 
-        .btn-center-icon {
-            font-size: 1rem;
-            font-weight: 500;
-            letter-spacing: 1px;
-            color: var(--text-primary);
-            opacity: 0.8;
-            transition: opacity 0.2s;
-        }
+        /* ----- 右侧：全量应用库 ----- */
+        .panel-launcher { width: 100%; max-width: 800px; display: flex; flex-direction: column; gap: 2rem; }
+        
+        .launcher-section { display: flex; flex-direction: column; gap: 1rem; }
+        .section-title { font-size: 0.75rem; font-weight: 600; color: var(--text-secondary); letter-spacing: 1.5px; text-transform: uppercase; margin-left: 0.5rem; }
+        
+        .app-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.8rem; }
 
-        /* ========== 底部功能区 ========== */
-        .bottom-section {
-            margin-top: 4rem;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 2.5rem;
-            width: 100%;
-            transition: margin 0.3s ease;
-        }
+        .app-btn { background: var(--surface-color); border: 1px solid var(--border-color); border-radius: 16px; aspect-ratio: 1/1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; cursor: pointer; transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+        .app-btn:active { transform: scale(0.92); background: var(--surface-hover); }
+        
+        .app-icon { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; background: rgba(255, 255, 255, 0.03); }
+        .app-icon svg { width: 22px; height: 22px; stroke: var(--text-primary); stroke-width: 1.5; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+        .app-label { font-size: 0.65rem; font-weight: 500; color: var(--text-primary); letter-spacing: 0.5px; }
 
-        .func-buttons {
-            display: flex;
-            gap: 1.5rem;
-        }
-
-        .func-btn {
-            width: 60px;
-            height: 60px;
-            border-radius: 30px;
-            background: var(--surface-color);
-            border: 1px solid var(--border-color);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-
-        .func-btn:active {
-            transform: scale(0.9);
-            background: var(--surface-hover);
-        }
-
-        .func-btn .icon {
-            font-size: 1.1rem;
-            margin-bottom: 2px;
-            opacity: 0.9;
-        }
-
-        .func-btn .label {
-            font-size: 0.6rem;
-            font-weight: 500;
-            color: var(--text-secondary);
-        }
-
-        /* ========== 状态输出 (Toast风格) ========== */
-        .output-display {
-            padding: 0.8rem 1.5rem;
-            background: rgba(255, 255, 255, 0.08);
-            border-radius: 20px;
-            font-size: 0.8rem;
-            color: var(--text-primary);
-            min-width: 180px;
-            text-align: center;
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-            opacity: 0;
-            transform: translateY(10px);
-            transition: all 0.3s ease;
-        }
-
-        .output-display.active {
-            opacity: 1;
-            transform: translateY(0);
-        }
+        /* 状态提示 (Toast) */
+        .toast { position: fixed; bottom: 40px; left: 50%; transform: translate(-50%, 20px); background: rgba(40, 40, 40, 0.9); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); padding: 10px 20px; border-radius: 20px; font-size: 0.85rem; color: #fff; z-index: 1000; opacity: 0; pointer-events: none; transition: all 0.3s ease; box-shadow: 0 10px 20px rgba(0,0,0,0.5); }
+        .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
         /* =========================================
-           🖥️ PC 端专属适配 (Media Queries)
-           当屏幕宽度大于 768px 时，自动触发大屏布局
+           🖥️ PC 端专属适配 (大视野全开)
            ========================================= */
-        @media (min-width: 768px) {
-            /* 1. 环境光向中心收束 */
-            .ambient-glow {
-                width: 40vw;
-                height: 40vw;
-            }
-
-            /* 2. 放大遥控触控盘 */
-            .remote-wrapper {
-                width: 320px;
-                height: 320px;
-            }
-
-            .btn-center {
-                width: 124px;
-                height: 124px;
-            }
-
-            .bottom-section {
-                margin-top: 5rem;
-            }
-
-            .func-btn {
-                width: 70px;
-                height: 70px;
-                border-radius: 35px;
-            }
-
-            .func-btn .label {
-                font-size: 0.65rem;
-            }
-
-            /* 3. PC 独占悬停动效 (Hover) */
-            .back-btn:hover {
-                background: rgba(255, 255, 255, 0.1);
-            }
-
-            .mode-btn:hover {
-                color: rgba(255, 255, 255, 0.8);
-                background: rgba(255, 255, 255, 0.05);
-            }
-
-            .direction-btn:hover {
-                background: rgba(255, 255, 255, 0.04); /* 极轻微的扇形高光 */
-            }
-
-            .direction-btn:hover svg {
-                stroke: var(--text-primary);
-                transform: scale(1.15); /* 鼠标滑过时线条提亮并放大 */
-            }
-
-            .btn-center:hover {
-                background: #202020;
-                box-shadow: 0 15px 30px rgba(0, 0, 0, 0.6);
-            }
-
-            .btn-center:hover .btn-center-icon {
-                opacity: 1;
-                transform: scale(1.05);
-            }
-
-            .func-btn:hover {
-                transform: translateY(-4px);
-                background: rgba(255, 255, 255, 0.12);
-                box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
-            }
+        @media (min-width: 1024px) {
+            .ambient-glow { width: 50vw; height: 50vw; top: 0; }
+            .dashboard { flex-direction: row; align-items: flex-start; justify-content: center; gap: 5rem; padding-top: 4rem; }
+            .panel-remote { position: sticky; top: 100px; width: 340px; flex-shrink: 0; }
+            .panel-launcher { flex-grow: 1; }
+            .app-grid { grid-template-columns: repeat(5, 1fr); gap: 1.2rem; }
+            .app-btn { border-radius: 20px; }
+            
+            /* PC 端专属悬停动效 */
+            .back-btn:hover { background: rgba(255,255,255,0.1); }
+            .mode-btn:hover { background: rgba(255,255,255,0.15); }
+            .direction-btn:hover svg { stroke: var(--text-primary); transform: scale(1.15); }
+            .btn-center:hover { background: #202020; box-shadow: 0 15px 30px rgba(0,0,0,0.6); }
+            .func-btn:hover { transform: translateY(-4px); background: rgba(255,255,255,0.12); box-shadow: 0 10px 20px rgba(0,0,0,0.3); }
+            
+            .app-btn:hover { transform: translateY(-5px); border-color: rgba(255,255,255,0.2); background: rgba(255,255,255,0.08); box-shadow: 0 12px 25px rgba(0,0,0,0.4); }
         }
 
-        /* 移动端矮屏幕特调 */
-        @media (max-height: 700px) {
+        /* 移动端矮屏幕特调 (iPhone SE等) */
+        @media (max-height: 700px) and (max-width: 600px) {
             .remote-wrapper { width: 240px; height: 240px; }
-            .btn-center { width: 90px; height: 90px; }
-            .bottom-section { margin-top: 2rem; gap: 1.5rem; }
-            .func-btn { width: 50px; height: 50px; }
+            .btn-center { width: 85px; height: 85px; }
+            .panel-remote { gap: 1.5rem; }
         }
     </style>
 </head>
 <body>
+
+    <script>
+        if (sessionStorage.getItem('isLoggedIn') !== 'true') {
+            window.location.replace('login.html'); 
+        }
+    </script>
+
     <div class="ambient-glow"></div>
 
     <header class="header">
-        <div class="back-btn" id="backBtn">
-            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <div class="back-btn" onclick="window.history.back()">
+            <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="15 18 9 12 15 6"></polyline>
             </svg>
         </div>
         <div class="connection-badge" id="connBadge">
-            <div class="badge-dot"></div>
+            <div class="badge-dot" id="statusDot"></div>
             <span id="connText">未连接</span>
         </div>
     </header>
 
-    <div class="mode-selector">
-        <div class="mode-btn active" data-mode="mqtt" id="modeMqtt">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M5 12.55a11 11 0 0 1 14.08 0"></path>
-                <path d="M1.42 9a16 16 0 0 1 21.16 0"></path>
-                <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
-                <line x1="12" y1="20" x2="12.01" y2="20"></line>
-            </svg>
-            <span>MQTT</span>
-        </div>
-        <div class="mode-btn" data-mode="ble" id="modeBle">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M6.5 6.5l11 11L12 23V1l5.5 5.5-11 11"></path>
-            </svg>
-            <span>蓝牙</span>
-        </div>
-    </div>
-
-    <main class="container">
-        <div class="remote-wrapper">
-            <div class="direction-btn btn-up" data-cmd="UP">
-                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="18 15 12 9 6 15"></polyline>
-                </svg>
+    <main class="dashboard">
+        <div class="panel-remote">
+            <div class="mode-selector">
+                <div class="mode-btn active" data-mode="mqtt" id="modeMqtt">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M5 12.55a11 11 0 0 1 14.08 0"></path>
+                        <path d="M1.42 9a16 16 0 0 1 21.16 0"></path>
+                        <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+                        <line x1="12" y1="20" x2="12.01" y2="20"></line>
+                    </svg>
+                    <span>MQTT</span>
+                </div>
+                <div class="mode-btn" data-mode="ble" id="modeBle">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M6.5 6.5l11 11L12 23V1l5.5 5.5-11 11"></path>
+                    </svg>
+                    <span>蓝牙</span>
+                </div>
             </div>
 
-            <div class="direction-btn btn-down" data-cmd="DOWN">
-                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="6 9 12 15 18 9"></polyline>
-                </svg>
+            <div class="remote-wrapper">
+                <div class="direction-btn btn-up" data-cmd="UP">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>
+                </div>
+                <div class="direction-btn btn-down" data-cmd="DOWN">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                </div>
+                <div class="direction-btn btn-left" data-cmd="LEFT">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                </div>
+                <div class="direction-btn btn-right" data-cmd="RIGHT">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </div>
+                <div class="btn-center" data-cmd="OK">
+                    <div class="btn-center-icon">OK</div>
+                </div>
             </div>
 
-            <div class="direction-btn btn-left" data-cmd="LEFT">
-                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="15 18 9 12 15 6"></polyline>
-                </svg>
-            </div>
-
-            <div class="direction-btn btn-right" data-cmd="RIGHT">
-                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="9 18 15 12 9 6"></polyline>
-                </svg>
-            </div>
-
-            <div class="btn-center" data-cmd="OK">
-                <div class="btn-center-icon">OK</div>
-            </div>
-        </div>
-
-        <div class="bottom-section">
             <div class="func-buttons">
                 <div class="func-btn" data-cmd="A">
                     <span class="icon">􀀁</span> <span class="label">OPT</span>
                 </div>
                 <div class="func-btn" data-cmd="B">
-                    <span class="icon">􀊰</span>
-                    <span class="label">MENU</span>
+                    <span class="icon">􀊰</span> <span class="label">MENU</span>
                 </div>
                 <div class="func-btn" data-cmd="C">
-                    <span class="icon">􀍡</span>
-                    <span class="label">BACK</span>
+                    <span class="icon">􀍡</span> <span class="label">BACK</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel-launcher">
+            
+            <div class="launcher-section">
+                <div class="section-title">核心视界</div>
+                <div class="app-grid">
+                    <div class="app-btn" data-cmd="GOTO_AR">
+                        <div class="app-icon"><svg viewBox="0 0 24 24"><polygon points="3 6 12 2 21 6 21 18 12 22 3 18"></polygon><line x1="12" y1="22" x2="12" y2="12"></line><line x1="21" y1="6" x2="12" y2="12"></line><line x1="3" y1="6" x2="12" y2="12"></line></svg></div>
+                        <div class="app-label">AR视界</div>
+                    </div>
+                    <div class="app-btn" data-cmd="GOTO_MENU">
+                        <div class="app-icon"><svg viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg></div>
+                        <div class="app-label">系统菜单</div>
+                    </div>
+                    <div class="app-btn" data-cmd="GOTO_AI">
+                        <div class="app-icon"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></div>
+                        <div class="app-label">AI字幕</div>
+                    </div>
+                    <div class="app-btn" data-cmd="GOTO_CALL">
+                        <div class="app-icon"><svg viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg></div>
+                        <div class="app-label">空间通话</div>
+                    </div>
+                    <div class="app-btn" data-cmd="GOTO_CAMERA">
+                        <div class="app-icon"><svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg></div>
+                        <div class="app-label">视觉相机</div>
+                    </div>
+                    <div class="app-btn" data-cmd="GOTO_RECORD">
+                        <div class="app-icon"><svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line></svg></div>
+                        <div class="app-label">语音备忘</div>
+                    </div>
+                    <div class="app-btn" data-cmd="GOTO_NOVEL">
+                        <div class="app-icon"><svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg></div>
+                        <div class="app-label">沉浸阅读</div>
+                    </div>
+                    <div class="app-btn" data-cmd="GOTO_CLOCK">
+                        <div class="app-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg></div>
+                        <div class="app-label">翻页时钟</div>
+                    </div>
                 </div>
             </div>
 
-            <div class="output-display" id="outputDisplay">准备就绪</div>
+            <div class="launcher-section">
+                <div class="section-title">环境感知</div>
+                <div class="app-grid">
+                    <div class="app-btn" data-cmd="GOTO_HEALTH">
+                        <div class="app-icon"><svg style="stroke: var(--danger-color);" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg></div>
+                        <div class="app-label">生命体征</div>
+                    </div>
+                    <div class="app-btn" data-cmd="GOTO_GPS">
+                        <div class="app-icon"><svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg></div>
+                        <div class="app-label">空间定位</div>
+                    </div>
+                    <div class="app-btn" data-cmd="GOTO_LIGHT">
+                        <div class="app-icon"><svg style="stroke: var(--warning-color);" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line></svg></div>
+                        <div class="app-label">光照感知</div>
+                    </div>
+                    <div class="app-btn" data-cmd="GOTO_NOISE">
+                        <div class="app-icon"><svg style="stroke: var(--info-color);" viewBox="0 0 24 24"><path d="M3 18v-6a9 9 0 0 1 18 0v6"></path><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path></svg></div>
+                        <div class="app-label">噪声分析</div>
+                    </div>
+                    <div class="app-btn" data-cmd="GOTO_WIFI">
+                        <div class="app-icon"><svg viewBox="0 0 24 24"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20"></line></svg></div>
+                        <div class="app-label">频段扫描</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="launcher-section">
+                <div class="section-title">声学与娱乐</div>
+                <div class="app-grid">
+                    <div class="app-btn" data-cmd="GOTO_MUSIC">
+                        <div class="app-icon"><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg></div>
+                        <div class="app-label">音乐播放</div>
+                    </div>
+                    <div class="app-btn" data-cmd="GOTO_PITCH">
+                        <div class="app-icon"><svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg></div>
+                        <div class="app-label">专业调音</div>
+                    </div>
+                    <div class="app-btn" data-cmd="GOTO_GAME_LIST">
+                        <div class="app-icon"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2" ry="2"></rect><path d="M12 12h.01"></path><path d="M17 12h.01"></path><path d="M7 12h.01"></path></svg></div>
+                        <div class="app-label">游戏大厅</div>
+                    </div>
+                    <div class="app-btn" data-cmd="GOTO_PLAYLIST">
+                        <div class="app-icon"><svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg></div>
+                        <div class="app-label">录音回放</div>
+                    </div>
+                    <div class="app-btn" data-cmd="GOTO_AUDIO">
+                        <div class="app-icon"><svg viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg></div>
+                        <div class="app-label">音频路由</div>
+                    </div>
+                </div>
+            </div>
+
         </div>
     </main>
 
+    <div class="toast" id="toast">准备就绪</div>
+
     <script>
-        // ==================== BLE 配置 (原逻辑保持不变) ====================
+        // ==================== BLE 配置 ====================
         const BLE_CONFIG = {
             SERVICE_1112_UUID: '00001112-0000-1000-8000-00805f9b34fb',
             CHAR_4444_UUID: '00004444-0000-1000-8000-00805f9b34fb',
             NAME_PREFIX: 'ESP_Web'
         };
 
-        let bleDevice = null;
-        let bleServer = null;
-        let bleService = null;
-        let char4444 = null;
+        let bleDevice = null, bleServer = null, bleService = null, char4444 = null;
         let isConnected = false;
-        let connectionMode = 'mqtt'; // 'mqtt' 或 'ble'
+        let connectionMode = 'mqtt'; // 默认 MQTT 模式
 
-        const backBtn = document.getElementById('backBtn');
         const connBadge = document.getElementById('connBadge');
         const connText = document.getElementById('connText');
-        const outputDisplay = document.getElementById('outputDisplay');
-        const allBtns = document.querySelectorAll('.direction-btn, .btn-center, .func-btn');
         const modeMqtt = document.getElementById('modeMqtt');
         const modeBle = document.getElementById('modeBle');
+        const toast = document.getElementById('toast');
 
         // ==================== 连接方式切换 ====================
         modeMqtt.addEventListener('click', () => switchMode('mqtt'));
@@ -533,12 +369,9 @@
 
         function switchMode(mode) {
             connectionMode = mode;
-
-            // 更新按钮状态
             modeMqtt.classList.toggle('active', mode === 'mqtt');
             modeBle.classList.toggle('active', mode === 'ble');
 
-            // 更新连接状态显示
             if (mode === 'mqtt') {
                 if (mqttClient && mqttClient.connected) {
                     connBadge.classList.add('connected');
@@ -556,133 +389,118 @@
                     connText.textContent = '未连接蓝牙';
                 }
             }
-
-            showOutput(`已切换到${mode === 'mqtt' ? 'MQTT' : '蓝牙'}模式`, true);
+            showToast(`已切换到 ${mode === 'mqtt' ? 'MQTT' : '蓝牙'} 模式`);
         }
-
-        // ==================== 返回断开逻辑 ====================
-        backBtn.addEventListener('click', () => {
-            if (isConnected && bleDevice && bleDevice.gatt.connected) {
-                bleDevice.gatt.disconnect();
-            }
-            window.history.back();
-        });
 
         // ==================== 蓝牙连接核心 ====================
         async function connectBLE() {
             try {
                 connText.textContent = '正在连接...';
-
                 bleDevice = await navigator.bluetooth.requestDevice({
                     filters: [{ namePrefix: BLE_CONFIG.NAME_PREFIX }],
                     optionalServices: [BLE_CONFIG.SERVICE_1112_UUID]
                 });
-
                 bleServer = await bleDevice.gatt.connect();
                 bleService = await bleServer.getPrimaryService(BLE_CONFIG.SERVICE_1112_UUID);
                 char4444 = await bleService.getCharacteristic(BLE_CONFIG.CHAR_4444_UUID);
-
                 isConnected = true;
-                // 只有在蓝牙模式下才更新状态显示
+                
                 if (connectionMode === 'ble') {
                     connBadge.classList.add('connected');
                     connText.textContent = bleDevice.name || '已连接';
                 }
-                showOutput('已连接至眼镜', true);
+                showToast('已连接至眼镜 (BLE)');
 
                 bleDevice.addEventListener('gattserverdisconnected', () => {
-                    isConnected = false;
-                    char4444 = null;
+                    isConnected = false; char4444 = null;
                     if (connectionMode === 'ble') {
                         connBadge.classList.remove('connected');
                         connText.textContent = '蓝牙已断开';
                     }
-                    showOutput('蓝牙连接已断开', false);
+                    showToast('蓝牙连接已断开');
                 });
-
             } catch (error) {
                 connText.textContent = '未连接设备';
-                showOutput(error.message, false);
+                showToast(error.message);
             }
         }
 
-        // ==================== 发送指令 ====================
-        async function sendCommand(cmd) {
-            // 震动反馈
+        // ==================== 发送指令核心 ====================
+        async function sendCommand(cmd, label = null) {
             if (navigator.vibrate) navigator.vibrate(15);
+            
+            // UI 反馈
+            if (label) showToast(`🚀 已触发：${label}`);
+            else showToast(`指令: ${cmd}`);
 
-            // 根据当前模式发送
             if (connectionMode === 'ble') {
-                // 蓝牙模式
                 if (!isConnected || !char4444) {
                     await connectBLE();
                     if (!isConnected) return;
                 }
-
                 try {
                     const encoder = new TextEncoder();
                     await char4444.writeValue(encoder.encode(cmd));
-                    showOutput(`蓝牙: ${cmd}`, true);
                 } catch (error) {
-                    showOutput('蓝牙发送失败', false);
+                    showToast('蓝牙发送失败');
                     if (error.message.includes('GATT') || error.message.includes('disconnect')) {
-                        isConnected = false;
-                        char4444 = null;
+                        isConnected = false; char4444 = null;
                         connBadge.classList.remove('connected');
                         connText.textContent = '连接丢失';
                     }
                 }
             } else {
-                // MQTT 模式
                 if (mqttClient && mqttClient.connected) {
-                    // 修复：直接发送纯字符串(cmd)，而不是 JSON 对象，确保匹配 C 代码逻辑
                     mqttClient.publish(MQTT_CONTROL_TOPIC, cmd);
-                    showOutput(`MQTT: ${cmd}`, true);
                     console.log(`[MQTT] ${MQTT_CONTROL_TOPIC}: ${cmd}`);
                 } else {
-                    showOutput('MQTT 未连接', false);
+                    showToast('⚠️ MQTT 未连接');
                 }
             }
         }
 
-        // ==================== 提示Toast逻辑 ====================
-        let outputTimeout;
-        function showOutput(text, success) {
-            outputDisplay.textContent = text;
-            outputDisplay.classList.add('active');
-            
-            clearTimeout(outputTimeout);
-            outputTimeout = setTimeout(() => {
-                outputDisplay.classList.remove('active');
-            }, 2000);
+        // ==================== 提示 Toast ====================
+        let toastTimeout;
+        function showToast(msg) {
+            toast.textContent = msg;
+            toast.classList.add('show');
+            clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => { toast.classList.remove('show'); }, 2000);
         }
 
         // ==================== 事件绑定 ====================
-        allBtns.forEach(btn => {
-            const cmd = btn.dataset.cmd;
-            // 处理点击与触摸
+        // 1. 遥控器十字键 (为了零延迟和顺滑操作，使用 pointerdown)
+        const remoteBtns = document.querySelectorAll('.direction-btn, .btn-center, .func-btn');
+        remoteBtns.forEach(btn => {
             btn.addEventListener('pointerdown', (e) => {
                 e.preventDefault();
-                sendCommand(cmd);
+                sendCommand(btn.dataset.cmd);
             });
-            // 阻止默认的长按菜单等行为
             btn.addEventListener('contextmenu', e => e.preventDefault());
+        });
+
+        // 2. APP 启动阵列 (为了防止手机端滑动页面时误触，使用 click)
+        const appBtns = document.querySelectorAll('.app-btn');
+        appBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const cmd = btn.dataset.cmd;
+                const label = btn.querySelector('.app-label').textContent;
+                sendCommand(cmd, label);
+                
+                // 点击下沉动效
+                btn.style.transform = 'scale(0.92)';
+                setTimeout(() => btn.style.transform = '', 150);
+            });
         });
 
         // ==================== 键盘映射 ====================
         document.addEventListener('keydown', (e) => {
-            const keyMap = {
-                'ArrowUp': 'UP', 'ArrowDown': 'DOWN',
-                'ArrowLeft': 'LEFT', 'ArrowRight': 'RIGHT',
-                'Enter': 'OK', ' ': 'OK'
-            };
-
+            const keyMap = { 'ArrowUp': 'UP', 'ArrowDown': 'DOWN', 'ArrowLeft': 'LEFT', 'ArrowRight': 'RIGHT', 'Enter': 'OK', ' ': 'OK' };
             const cmd = keyMap[e.key];
             if (cmd) {
                 e.preventDefault();
-                const btn = document.querySelector(`[data-cmd="${cmd}"]`);
+                const btn = document.querySelector(`.remote-wrapper [data-cmd="${cmd}"]`);
                 if (btn) {
-                    // 模拟按压视觉效果
                     btn.style.transform = btn.classList.contains('btn-center') ? 'translate(-50%, -50%) scale(0.94)' : 'scale(0.95)';
                     setTimeout(() => btn.style.transform = '', 150);
                     sendCommand(cmd);
@@ -690,36 +508,30 @@
             }
         });
 
-        // 检查蓝牙支持情况
         if (!navigator.bluetooth) {
-            showOutput('当前环境不支持蓝牙 API', false);
-            allBtns.forEach(btn => btn.style.opacity = '0.3');
+            console.warn('当前环境不支持蓝牙 API');
+            modeBle.style.opacity = '0.3';
         }
 
-        // ==================== 网页 MQTT 连接 ====================
-        const MQTT_BROKER = 'ws://124.220.224.189:8083/mqtt';
+        // ==================== MQTT 初始化 ====================
+        const MQTT_BROKER = 'wss://www.runishandsome.asia/mqtt';
         const MQTT_CONTROL_TOPIC = 'esp32/glass/control';
 
-        const mqttOptions = {
+        const mqttClient = mqtt.connect(MQTT_BROKER, {
             clientId: 'web_remote_' + Math.random().toString(16).substr(2, 8),
             username: 'RUN',
             password: '88888888',
             clean: true
-        };
-
-        const mqttClient = mqtt.connect(MQTT_BROKER, mqttOptions);
+        });
 
         mqttClient.on('connect', () => {
-            console.log('✅ 网页 MQTT 已连接');
-            // 如果当前是MQTT模式，更新状态显示
             if (connectionMode === 'mqtt') {
                 connBadge.classList.add('connected');
                 connText.textContent = 'MQTT 就绪';
             }
         });
 
-        mqttClient.on('error', (err) => {
-            console.error('MQTT 连接错误:', err);
+        mqttClient.on('error', () => {
             if (connectionMode === 'mqtt') {
                 connBadge.classList.remove('connected');
                 connText.textContent = 'MQTT 失败';
@@ -727,14 +539,12 @@
         });
 
         mqttClient.on('offline', () => {
-            console.log('⚠️ MQTT 已断开');
             if (connectionMode === 'mqtt') {
                 connBadge.classList.remove('connected');
                 connText.textContent = 'MQTT 离线';
             }
         });
 
-        // 初始化：默认MQTT模式
         switchMode('mqtt');
     </script>
 </body>

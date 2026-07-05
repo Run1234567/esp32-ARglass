@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>录音档案 - J.A.R.V.I.S</title>
+    <style>
+        :root {
+            --bg-color: #000000;
+            --surface-color: rgba(255, 255, 255, 0.03);
+            --surface-hover: rgba(255, 255, 255, 0.06);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --text-primary: #ffffff;
+            --text-secondary: rgba(255, 255, 255, 0.5);
+            --text-tertiary: rgba(255, 255, 255, 0.3);
+            --accent-color: #0a84ff;
+            --danger-color: #ff453a;
+            --danger-hover: rgba(255, 69, 58, 0.15);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            min-height: 100vh;
+            min-height: 100dvh;
+            background: var(--bg-color);
+            color: var(--text-primary);
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            overflow-x: hidden;
+            /* 强制浏览器原生组件使用暗黑皮肤 */
+            color-scheme: dark; 
+        }
+
+        /* ========== PC端定制高科技滚动条 ========== */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        /* ========== 极简环境光 ========== */
+        .ambient-glow {
+            position: fixed;
+            top: -10%;
+            left: 50%;
+            width: 60vw;
+            height: 60vw;
+            transform: translateX(-50%);
+            background: radial-gradient(circle, rgba(10, 132, 255, 0.06) 0%, transparent 60%);
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        /* ========== 顶部导航栏 ========== */
+        .header {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            padding: 1rem 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .icon-btn {
+            width: 38px;
+            height: 38px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            color: var(--text-primary);
+        }
+
+        .icon-btn:hover { background: var(--surface-hover); }
+        .icon-btn:active { transform: scale(0.92); }
+        .icon-btn svg { width: 20px; height: 20px; stroke: currentColor; stroke-width: 2; }
+
+        .header-title {
+            font-size: 1.05rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        /* 刷新按钮旋转 */
+        #refreshIcon { transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1); }
+
+        /* ========== 主内容区 (全面适配电脑端网格) ========== */
+        .content {
+            position: relative;
+            z-index: 1;
+            padding: 2rem;
+            max-width: 1400px; /* 拓宽最大宽度以适配2K/1080P大屏 */
+            margin: 0 auto;
+            
+            /* 采用标准化网格布局 */
+            display: grid;
+            grid-template-columns: repeat(1, minmax(0, 1fr));
+            gap: 1.5rem;
+        }
+
+        /* 电脑端响应式断点控制 */
+        @media (min-width: 640px) {
+            .content { grid-template-columns: repeat(2, minmax(0, 1fr)); } /* 平板双列 */
+        }
+        @media (min-width: 1024px) {
+            .content { grid-template-columns: repeat(3, minmax(0, 1fr)); } /* 普通PC三列 */
+        }
+        @media (min-width: 1440px) {
+            .content { grid-template-columns: repeat(4, minmax(0, 1fr)); } /* 高分屏四列 */
+        }
+
+        /* ========== 录音网格卡片 ========== */
+        .record-card {
+            background: var(--surface-color);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 1.2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            animation: fadeInUp 0.4s ease backwards;
+        }
+
+        /* PC端高阶悬浮动效 */
+        @media (hover: hover) {
+            .record-card:hover {
+                transform: translateY(-4px);
+                background: var(--surface-hover);
+                border-color: rgba(255, 255, 255, 0.15);
+                box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+            }
+        }
+
+        /* 列表项依次淡入 */
+        .record-card:nth-child(1) { animation-delay: 0.03s; }
+        .record-card:nth-child(2) { animation-delay: 0.06s; }
+        .record-card:nth-child(3) { animation-delay: 0.09s; }
+        .record-card:nth-child(4) { animation-delay: 0.12s; }
+
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* 卡片头部 */
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .time-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            font-variant-numeric: tabular-nums;
+        }
+        
+        .time-badge svg { width: 14px; height: 14px; opacity: 0.7; }
+
+        .delete-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-tertiary);
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .delete-btn:hover {
+            color: var(--danger-color);
+            background: var(--danger-hover);
+        }
+
+        .delete-btn svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 2; }
+
+        /* 底部播放器容器 */
+        .card-footer {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 6px 10px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+        }
+
+        .custom-audio {
+            width: 100%;
+            height: 40px;
+            outline: none;
+        }
+
+        /* ========== 状态提示 (在大屏上跨列横向居中) ========== */
+        .status-msg {
+            grid-column: 1 / -1; /* 核心：使其在Grid网格中横跨整行，完美居中 */
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            padding: 6rem 1rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1.2rem;
+        }
+
+        .spinner {
+            width: 28px;
+            height: 28px;
+            border: 2px solid var(--surface-color);
+            border-top-color: var(--accent-color);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+
+    <script>
+        if (sessionStorage.getItem('isLoggedIn') !== 'true') {
+            window.location.replace('login.html'); 
+        }
+    </script>
+
+    <div class="ambient-glow"></div>
+
+    <header class="header">
+        <button class="icon-btn" onclick="window.history.back()" title="返回">
+            <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="15 18 9 12 15 6"></polyline>
+            </svg>
+        </button>
+        <div class="header-title">云端录音档案</div>
+        <button class="icon-btn" onclick="fetchRecordings()" title="同步刷新">
+            <svg id="refreshIcon" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.92-10.27l-5.42 5.42"/>
+            </svg>
+        </button>
+    </header>
+
+    <main class="content" id="recordList">
+        <div class="status-msg">
+            <div class="spinner"></div>
+            正在同步云端档案...
+        </div>
+    </main>
+
+    <script>
+        // ==================== 获取并渲染录音列表 ====================
+        async function fetchRecordings() {
+            const listEl = document.getElementById('recordList');
+            const refreshIcon = document.getElementById('refreshIcon');
+            
+            // 刷新按钮动画
+            refreshIcon.style.transform = 'rotate(360deg)';
+            listEl.innerHTML = `
+                <div class="status-msg">
+                    <div class="spinner"></div>
+                    正在同步云端档案...
+                </div>`;
+
+            try {
+                const response = await fetch('/api/get_recordings');
+                const res = await response.json();
+
+                listEl.innerHTML = ''; // 清空列表
+
+                if (res.status === 'success') {
+                    if (res.data.length === 0) {
+                        listEl.innerHTML = '<div class="status-msg">☁️ 暂无录音档案</div>';
+                        return;
+                    }
+
+                    // 遍历数据并渲染卡片 (无文字、无伪造元数据的纯净形态)
+                    res.data.forEach((item, index) => {
+                        const cardHtml = `
+                            <div class="record-card">
+                                <div class="card-header">
+                                    <div class="time-badge">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                                            <circle cx="12" cy="12" r="10"></circle>
+                                            <polyline points="12 6 12 12 16 14"></polyline>
+                                        </svg>
+                                        ${item.created_at || '未知时间'}
+                                    </div>
+                                    <button class="delete-btn" onclick="deleteRecord(${item.id})" title="删除此档案">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M3 6h18"></path>
+                                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                        </svg>
+                                    </button>
+                                </div>
+                                
+                                <div class="card-footer">
+                                    <audio class="custom-audio" controls src="${item.url || item.file_path}"></audio>
+                                </div>
+                            </div>
+                        `;
+                        listEl.innerHTML += cardHtml;
+                    });
+                } else {
+                    listEl.innerHTML = `<div class="status-msg">数据解析异常: ${res.message}</div>`;
+                }
+            } catch (error) {
+                listEl.innerHTML = `
+                    <div class="status-msg" style="color: var(--danger-color);">
+                        无法连接到云端数据库，请检查 API 状态。<br><br>
+                        <span style="font-size: 0.85rem; opacity: 0.8;">错误详情: ${error.message}</span>
+                    </div>`;
+            }
+
+            // 恢复刷新按钮角度
+            setTimeout(() => { refreshIcon.style.transform = 'rotate(0deg)'; }, 500);
+        }
+
+        // ==================== 核心：请求后端删除录音 ====================
+        async function deleteRecord(id) {
+            if (!confirm(`警告：确定要彻底删除云端录音 #${id} 吗？\n文件删除后无法恢复！`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/delete_recording/${id}`, {
+                    method: 'POST'
+                });
+                const res = await response.json();
+
+                if (res.status === 'success') {
+                    fetchRecordings();
+                } else {
+                    alert(`删除失败: ${res.message}`);
+                }
+            } catch (error) {
+                alert(`网络错误: ${error.message}`);
+            }
+        }
+
+        // ==================== 页面加载时自动获取数据 ====================
+        window.addEventListener('DOMContentLoaded', fetchRecordings);
+    </script>
+</body>
+</html>
