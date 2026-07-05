@@ -55,7 +55,8 @@ static i2s_chan_handle_t tx_chan;
  * 默认 100% 音量。通过 set_speaker_volume() 调节。
  * 0 = 静音，100 = 原始音量 (跳过缩放计算)
  */
-static uint8_t global_volume = 100;
+static uint8_t global_volume = 100;  // 音量百分比 (0-100)
+static uint8_t global_gain = 2;     // 软件增益倍数 (1-8)，默认 2 倍放大
 
 /**
  * @brief 设置扬声器音量
@@ -73,6 +74,18 @@ void set_speaker_volume(uint8_t vol) {
  */
 uint8_t get_speaker_volume(void) {
     return global_volume;
+}
+
+/**
+ * @brief 设置软件增益倍数
+ * @param gain 增益倍数 (1-8)，1=不放大，4=4倍放大
+ * 默认 4 倍，TTS/音乐等小信号源建议 4-6 倍
+ */
+void set_speaker_gain(uint8_t gain) {
+    if (gain < 1) gain = 1;
+    if (gain > 8) gain = 8;
+    global_gain = gain;
+    ESP_LOGI(TAG, "🔊 软件增益已设置为: %dx", global_gain);
 }
 
 /* =====================================================================
@@ -145,8 +158,8 @@ void playSpeaker(const uint8_t *data, size_t length) {
     /* ---- 静音模式：直接丢弃数据 ---- */
     if (global_volume == 0) return;
 
-    /* ---- 满音量模式：直接输出，节省 CPU ---- */
-    if (global_volume == 100) {
+    /* ---- 满音量 + 无增益：直接输出，节省 CPU ---- */
+    if (global_volume == 100 && global_gain == 1) {
         size_t bytes_written = 0;
         i2s_channel_write(tx_chan, data, length, &bytes_written, pdMS_TO_TICKS(1000));
         return;
@@ -169,10 +182,16 @@ void playSpeaker(const uint8_t *data, size_t length) {
     int16_t *pcm_out = (int16_t *)temp_buf;  // 输出: 缩放后的 PCM 数据
     size_t sample_count = length / 2;         // 采样点数 = 字节数 / 2
 
-    // 步骤3: 遍历每个采样点，进行音量缩放
+    // 步骤3: 遍历每个采样点，进行音量缩放 + 增益放大
     for (size_t i = 0; i < sample_count; i++) {
-        // 先提升到 32-bit 做乘法，防止 16-bit * 100 溢出
-        int32_t sample = (int32_t)pcm_in[i] * global_volume / 100;
+        // 先提升到 32-bit 做乘法，防止溢出
+        int32_t sample = (int32_t)pcm_in[i];
+
+        // 应用软件增益放大 (默认 4 倍)
+        sample *= global_gain;
+
+        // 应用音量百分比缩放
+        sample = sample * global_volume / 100;
 
         // 防爆音保护 (Clipping):
         // 16-bit 有符号整数范围: -32768 ~ +32767

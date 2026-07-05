@@ -37,6 +37,7 @@
 #include <stdio.h>
 #include <sys/stat.h>         // mkdir 等文件系统操作
 #include "sd_card_app.h"      // MOUNT_POINT 定义
+#include "esp_http_client.h"  // HTTP 客户端 (用于上传照片)
 
 static const char *TAG = "CAMERA_APP";  // 日志标签
 
@@ -193,6 +194,79 @@ void initCamera(void) {
 }
 
 /* =====================================================================
+ * 照片上传到云端服务器
+ * =====================================================================
+ * @brief 将摄像头拍摄的 JPEG 图片通过 HTTP POST 上传到服务器
+ *
+ * 使用 multipart/form-data 格式，直接从 PSRAM 帧缓冲读取数据，
+ * 不需要先保存到 SD 卡再读取。
+ *
+ * @param pic 摄像头帧缓冲指针
+ */
+#define PHOTO_UPLOAD_URL "http://124.220.224.189:5000/upload_image"
+
+static void upload_photo_to_server(camera_fb_t *pic) {
+    if (!pic) return;
+
+    ESP_LOGI(TAG, "🚀 开始上传照片到服务器... 大小: %d 字节", pic->len);
+
+    esp_http_client_config_t config = {
+        .url = PHOTO_UPLOAD_URL,
+        .method = HTTP_METHOD_POST,
+        .timeout_ms = 15000,  // UXGA 图片较大，15 秒超时
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (!client) {
+        ESP_LOGE(TAG, "HTTP 客户端初始化失败");
+        return;
+    }
+
+    // 构建 multipart/form-data 报文
+    const char *boundary = "----Esp32CameraBoundary";
+
+    char header[256];
+    snprintf(header, sizeof(header),
+        "--%s\r\n"
+        "Content-Disposition: form-data; name=\"file\"; filename=\"esp32_photo.jpg\"\r\n"
+        "Content-Type: image/jpeg\r\n\r\n", boundary);
+
+    char footer[64];
+    snprintf(footer, sizeof(footer), "\r\n--%s--\r\n", boundary);
+
+    char content_type[128];
+    snprintf(content_type, sizeof(content_type), "multipart/form-data; boundary=%s", boundary);
+    esp_http_client_set_header(client, "Content-Type", content_type);
+
+    int total_len = strlen(header) + pic->len + strlen(footer);
+
+    esp_err_t err = esp_http_client_open(client, total_len);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "❌ HTTP 连接失败: %s", esp_err_to_name(err));
+        esp_http_client_cleanup(client);
+        return;
+    }
+
+    // 分段写入：表头 → 图片二进制 → 表尾
+    esp_http_client_write(client, header, strlen(header));
+    esp_http_client_write(client, (const char *)pic->buf, pic->len);
+    esp_http_client_write(client, footer, strlen(footer));
+
+    // 读取服务器响应
+    esp_http_client_fetch_headers(client);
+    int status_code = esp_http_client_get_status_code(client);
+
+    if (status_code == 200) {
+        ESP_LOGI(TAG, "✅ 照片上传成功！状态码: %d", status_code);
+    } else {
+        ESP_LOGE(TAG, "⚠️ 上传异常，状态码: %d", status_code);
+    }
+
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+}
+
+/* =====================================================================
  * 拍照并保存到 PZ 文件夹
  * =====================================================================
  * @brief 拍摄一张照片并保存到 SD 卡的 /sdcard/PZ/ 目录
@@ -242,16 +316,18 @@ void take_photo_to_PZ_folder(void) {
     }
 
     /* ---- 步骤4: 写入 SD 卡 ---- */
-    // 现在 file_path 就是一个绝对不会被覆盖的路径
     file = fopen(file_path, "wb");
     if (file != NULL) {
-        fwrite(pic->buf, 1, pic->len, file);  // 写入 JPEG 二进制数据
+        fwrite(pic->buf, 1, pic->len, file);
         fclose(file);
-        ESP_LOGI(TAG, "📸 照片已成功保存: %s (%d bytes)", file_path, pic->len);
+        ESP_LOGI(TAG, "📸 照片已保存: %s (%d bytes)", file_path, pic->len);
     } else {
         ESP_LOGE(TAG, "❌ 无法创建文件: %s", file_path);
     }
 
-    /* ---- 步骤5: 释放帧缓冲 ---- */
+    /* ---- 步骤5: 上传到服务器 ---- */
+    upload_photo_to_server(pic);
+
+    /* ---- 步骤6: 释放帧缓冲 ---- */
     esp_camera_fb_return(pic);  // 重要：归还给驱动，否则内存泄漏
 }

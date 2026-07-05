@@ -23,6 +23,6 @@ FILE(GLOB_RECURSE app_sources ${CMAKE_SOURCE_DIR}/src/*.c)
 idf_component_register(
     SRCS ${app_sources}                    # 源文件列表
     INCLUDE_DIRS "."                       # 头文件搜索路径 (当前目录)
-    PRIV_REQUIRES camera_app audio_app wifi_app speaker_app my_uart record_app tts_app music_app voice_app ai_chat
+    PRIV_REQUIRES camera_app audio_app wifi_app speaker_app my_uart record_app tts_app music_app voice_app ai_chat lwip mqtt
     # PRIV_REQUIRES: 私有依赖，只在编译此组件时使用
 )

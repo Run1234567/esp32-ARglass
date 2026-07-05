@@ -14,6 +14,7 @@
 #include "ai_chat_protocol.h"
 #include "ai_chat_ws.h"
 #include "ai_chat_audio.h"
+#include "my_uart.h"   // UI MCU 字幕发送
 
 static const char *TAG = "AI_PROTO";
 
@@ -259,6 +260,8 @@ void proto_handle_server_text(const char *data, int len) {
             } else if (strcmp(state->valuestring, "sentence_start") == 0) {
                 if (text && cJSON_IsString(text)) {
                     ESP_LOGI(TAG, "🗣️ AI: %s", text->valuestring);
+                    /* 发送字幕给 UI MCU */
+                    ui_update_subtitle(text->valuestring);
                 }
             }
         }

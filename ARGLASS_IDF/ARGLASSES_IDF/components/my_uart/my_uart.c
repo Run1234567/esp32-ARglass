@@ -330,6 +330,41 @@ static void uart_event_task(void *pvParameters)
                             extern void stop_yin_pitch_task(void); stop_yin_pitch_task();
                         }
 
+                        // ================= 接收 WiFi 账号密码 =================
+                        // WIFI:SSID,密码
+                        else if (strncmp(cmd_line, "WIFI:", 5) == 0) {
+                            char *payload = cmd_line + 5;
+                            char *comma = strchr(payload, ',');
+
+                            if (comma != NULL) {
+                                *comma = '\0';  // 将逗号替换为结束符，截断成两半
+
+                                char *ssid = payload;
+                                char *password = comma + 1;
+
+                                ESP_LOGI(TAG, "📡 串口解析出 WiFi 配置 -> SSID: %s, 密码: %s", ssid, password);
+
+                                // 调用 wifi_app.c 中的动态连接函数
+                                extern void wifi_connect_dynamic(const char* ssid, const char* pass);
+                                wifi_connect_dynamic(ssid, password);
+                            } else {
+                                ESP_LOGW(TAG, "⚠️ 串口收到的 WiFi 格式缺少逗号: %s", cmd_line);
+                            }
+                        }
+                        // ==========================================================
+
+                        // ================= 网络通话指令解析 =================
+                        // CMD:CALL_START / CMD:CALL_ACCEPT / CMD:CALL_END
+                        // 转发给信令任务处理
+                        else if (strstr(cmd_line, "CMD:CALL_START") ||
+                                 strstr(cmd_line, "CMD:CALL_ACCEPT") ||
+                                 strstr(cmd_line, "CMD:CALL_END")) {
+                            extern void handle_ui_action(const char *cmd);
+                            handle_ui_action(cmd_line);
+                            ESP_LOGI(TAG, "📞 通话指令已转发: %s", cmd_line);
+                        }
+                        // ==========================================================
+
                         // 继续解析下一条命令
                         cmd_line = strtok(NULL, "\r\n");
                     }
@@ -392,7 +427,8 @@ void my_uart_init(void) {
 
     /* ---- 启动事件处理任务 ---- */
     // 优先级 12：非常高，确保 UI 命令能被及时处理
-    xTaskCreate(uart_event_task, "uart_event_task", 4096, NULL, 12, NULL);
+    // 栈加大到 8192，支持 HTTP 发送图片时不崩溃
+    xTaskCreate(uart_event_task, "uart_event_task", 8192, NULL, 12, NULL);
 
     ESP_LOGI(TAG, "UART initialized on TX:%d, RX:%d", TXD_PIN, RXD_PIN);
 }
@@ -407,4 +443,18 @@ void my_uart_init(void) {
 void my_uart_send(const char* data) {
     if (data == NULL) return;
     uart_write_bytes(UART_NUM, data, strlen(data));
+}
+
+/* =====================================================================
+ * AI 字幕发送函数
+ * ===================================================================== */
+void ui_update_subtitle(const char *text) {
+    if (text == NULL || strlen(text) == 0) {
+        return;
+    }
+
+    char send_buf[512];
+    snprintf(send_buf, sizeof(send_buf), "SUB:%s\r\n", text);
+    my_uart_send(send_buf);
+    ESP_LOGI(TAG, "字幕已发送: SUB:%s", text);
 }

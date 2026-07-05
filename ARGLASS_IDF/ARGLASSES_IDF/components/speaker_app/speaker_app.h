@@ -49,4 +49,10 @@ void set_speaker_volume(uint8_t vol);
  */
 uint8_t get_speaker_volume(void);
 
+/**
+ * @brief 设置软件增益倍数 (放大倍数)
+ * @param gain 增益倍数 (1-8)，1=不放大，4=4倍放大，默认4
+ */
+void set_speaker_gain(uint8_t gain);
+
 #endif // SPEAKER_APP_H

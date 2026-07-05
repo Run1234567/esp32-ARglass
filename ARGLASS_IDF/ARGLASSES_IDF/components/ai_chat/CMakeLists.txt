@@ -22,6 +22,7 @@ idf_component_register(
         log
         speaker_app
         tts_app
+        my_uart
 )
 
 # Opus compile definitions (already in opus_src/config.h, only add missing ones)

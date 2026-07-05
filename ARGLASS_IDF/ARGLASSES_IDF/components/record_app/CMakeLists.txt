@@ -11,4 +11,4 @@
 
 idf_component_register(SRCS "record_app.c"
                        INCLUDE_DIRS "."
-                       REQUIRES sd_card_app audio_app esp32-camera my_uart)
+                       REQUIRES sd_card_app audio_app esp32-camera my_uart esp_http_client)

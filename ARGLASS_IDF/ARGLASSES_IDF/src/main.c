@@ -39,6 +39,13 @@
 #include <math.h>      // 提供 log2f, sqrtf, log10f, roundf 等数学函数
 #include <dirent.h>    // 目录遍历 (scandir 等)
 
+/* ==================== 网络 Socket 头文件 ==================== */
+#include "lwip/sockets.h"   // TCP Socket API (connect/recv/send/close)
+#include "lwip/netdb.h"     // 网络数据库 (DNS 等)
+#include "lwip/inet.h"      // inet_addr 等地址转换函数
+#include "lwip/err.h"       // 错误码定义
+#include "lwip/sys.h"       // 系统抽象层
+
 /* ==================== FreeRTOS 头文件 ==================== */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"       // 任务创建、删除、延时
@@ -90,6 +97,40 @@ esp_tts_handle_t *tts_handle = NULL;
 static const char *TAG = "J.A.R.V.I.S";  // 主程序日志前缀
 
 /* =====================================================================
+ * 网络通话配置 (三任务架构: 信令 + 音频上行 + 音频下行)
+ * =====================================================================
+ * 端口分配：
+ *   7777: 信令端口 (LOGIN/CALL/ACCEPT/HANGUP 控制指令)
+ *   8888: 音频上行 (麦克风 PCM -> 服务器)
+ *   8889: 音频下行 (服务器 PCM -> 扬声器)
+ */
+#define SERVER_IP       "124.220.224.189"
+#define PORT_SIG        7777   // 信令端口
+#define PORT_A_IN       8888   // 设备A 麦克风发送端口
+#define PORT_A_OUT      8889   // 设备A 扬声器接收端口
+
+/**
+ * @brief 通话状态标志
+ * 由信令任务 (signaling_task) 管理：
+ *   - 收到 "ACCEPTED" -> true
+ *   - 收到 "HANGUP"   -> false
+ *   - 本地挂断        -> false
+ */
+volatile bool is_in_call = false;
+
+/**
+ * @brief 信令 Socket 句柄 (供 handle_ui_action 发送信令用)
+ */
+static int sig_sock = -1;
+
+/**
+ * @brief 对讲专用音频缓冲区
+ * audio_hub_task 在通话时将麦克风数据写入此缓冲区
+ * network_audio_tx_task 从这里读取并发送到服务器
+ */
+RingbufHandle_t intercom_ringbuf = NULL;
+
+/* =====================================================================
  * 音频环形缓冲区 (Ring Buffer) - 音频数据多路分发核心
  * =====================================================================
  * 音频 Hub 任务从麦克风读取数据后，需要同时发送给多个消费者：
@@ -110,6 +151,11 @@ RingbufHandle_t ai_ringbuf = NULL;   // AI 对话音频缓冲区 (Opus 编码)
  * ===================================================================== */
 volatile bool send_noise_data = false;  // 是否向 UI 发送分贝数据 (CMD:NOISE_ON/OFF)
 volatile bool send_pitch_data = false;  // 是否向 UI 发送音调数据 (CMD:PITCH_ON/OFF)
+
+/**
+ * @brief 最新分贝值 (由 audio_hub_task 更新，MQTT 任务读取)
+ */
+volatile float latest_db_value = 0.0f;
 
 /**
  * @brief 扬声器互斥锁
@@ -343,6 +389,7 @@ void audio_hub_task(void *pvParameters) {
             }
             /* ---- 1. 分贝计算 ---- */
             float db_value = calculate_decibel(audioBuffer, samples);
+            latest_db_value = db_value;  // 存储最新值供 MQTT 发布
 
             // 如果 UI 开启了噪声监测，每 100ms 发送一次分贝值
             if (send_noise_data) {
@@ -388,6 +435,12 @@ void audio_hub_task(void *pvParameters) {
                     ESP_LOGE("HUB", "ai_ringbuf 是 NULL!");
                     ai_null_dbg++;
                 }
+            }
+
+            /* ---- 6. 发送给网络对讲模块 ---- */
+            if (is_in_call && intercom_ringbuf != NULL) {
+                // 超时 0：网络堵塞时直接丢弃，绝不卡死麦克风采集
+                xRingbufferSend(intercom_ringbuf, audioBuffer, bytesRead, 0);
             }
         }
     }
@@ -560,6 +613,243 @@ void yin_pitch_task(void *pvParameters) {
 }
 
 /* =====================================================================
+ * MQTT 噪声数据定时发布任务
+ * =====================================================================
+ * @brief 每 5 秒通过 MQTT 发布一次当前环境噪声分贝值
+ *
+ * 主题: esp32/glass/noise
+ * 格式: JSON {"db": 75.2}
+ * 条件: MQTT 客户端已连接
+ */
+#include "mqtt_client.h"  // MQTT 客户端库
+
+static esp_mqtt_client_handle_t s_mqtt_client = NULL;
+
+static void mqtt_noise_task(void *arg) {
+    vTaskDelay(pdMS_TO_TICKS(8000));  // 等待 WiFi 和 MQTT 就绪
+
+    while (1) {
+        if (s_mqtt_client != NULL) {
+            char payload[32];
+            snprintf(payload, sizeof(payload), "{\"db\":%.1f}", latest_db_value);
+            esp_mqtt_client_publish(s_mqtt_client, "esp32/glass/noise", payload, 0, 0, 0);
+        }
+        vTaskDelay(pdMS_TO_TICKS(5000));  // 每 5 秒发布一次
+    }
+}
+
+/* =====================================================================
+ * 信令管理任务 (端口 7777)
+ * =====================================================================
+ * @brief 连接服务器信令端口，处理 LOGIN/CALL/ACCEPT/HANGUP 控制指令
+ *
+ * 工作流程：
+ *   1. 连接服务器 7777 端口
+ *   2. 发送 "LOGIN:A\n" 注册身份
+ *   3. 循环接收信令指令：
+ *      - "RING"     -> 远端呼叫我 -> 通知 UI 显示来电
+ *      - "ACCEPTED" -> 对方接听   -> is_in_call = true，开启音频
+ *      - "HANGUP"   -> 对方挂断   -> is_in_call = false，停止音频
+ *   4. 断线后自动重连
+ */
+static void signaling_task(void *pvParameters) {
+    vTaskDelay(pdMS_TO_TICKS(5000));  // 等待 WiFi 就绪
+
+    struct sockaddr_in dest_addr;
+    dest_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
+    dest_addr.sin_family = AF_INET;
+    dest_addr.sin_port = htons(PORT_SIG);
+
+    while (1) {
+        sig_sock = socket(AF_INET, SOCK_STREAM, 0);
+        if (sig_sock < 0) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
+
+        ESP_LOGI("SIG", "正在连接云服务器信令端口 %d...", PORT_SIG);
+        if (connect(sig_sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr)) == 0) {
+            ESP_LOGI("SIG", "✅ 已连接到云服务器信令基站！");
+
+            // 上线后注册身份 (设备A)
+            const char *login_cmd = "LOGIN:A\n";
+            send(sig_sock, login_cmd, strlen(login_cmd), 0);
+
+            char rx_buffer[128];
+            while (1) {
+                int len = recv(sig_sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
+                if (len > 0) {
+                    rx_buffer[len] = '\0';
+                    ESP_LOGI("SIG", "收到云端信令: %s", rx_buffer);
+
+                    if (strstr(rx_buffer, "RING")) {
+                        // 远端呼叫我 -> 通知 UI 显示来电界面
+                        my_uart_send("NTF:RING\r\n");
+                    } else if (strstr(rx_buffer, "ACCEPTED")) {
+                        // 对方接听 -> 开启音频上下行
+                        is_in_call = true;
+                        my_uart_send("NTF:CALL_ESTABLISHED\r\n");
+                    } else if (strstr(rx_buffer, "HANGUP")) {
+                        // 对方挂断 -> 停止音频
+                        is_in_call = false;
+                        my_uart_send("NTF:CALL_END\r\n");
+                    }
+                } else {
+                    break;  // 链路断开，触发重连
+                }
+            }
+        }
+
+        close(sig_sock);
+        sig_sock = -1;
+        is_in_call = false;
+        ESP_LOGE("SIG", "信令断开，5秒后尝试重连...");
+        vTaskDelay(pdMS_TO_TICKS(5000));
+    }
+}
+
+/**
+ * @brief 处理 UI 板发来的通话操作指令
+ *
+ * 由 my_uart.c 的命令解析区调用，将 UI 操作转发为信令发送给服务器。
+ *
+ * @param cmd UI 命令字符串 (如 "CMD:CALL_START", "CMD:CALL_ACCEPT", "CMD:CALL_END")
+ */
+void handle_ui_action(const char *cmd) {
+    if (sig_sock < 0) return;  // 信令未连接，忽略
+
+    if (strstr(cmd, "CMD:CALL_START")) {
+        // UI 请求拨号 -> 发送 CALL 信令
+        send(sig_sock, "CALL\n", 5, 0);
+        ESP_LOGI("SIG", "📤 发送拨号信令");
+    } else if (strstr(cmd, "CMD:CALL_ACCEPT")) {
+        // UI 点击接听 -> 发送 ACCEPT 信令
+        send(sig_sock, "ACCEPT\n", 7, 0);
+        is_in_call = true;  // 本地直接进入通话状态
+        ESP_LOGI("SIG", "📤 发送接听信令");
+    } else if (strstr(cmd, "CMD:CALL_END")) {
+        // UI 点击挂断 -> 发送 HANGUP 信令
+        send(sig_sock, "HANGUP\n", 7, 0);
+        is_in_call = false;
+        ESP_LOGI("SIG", "📤 发送挂断信令");
+    }
+}
+
+/* =====================================================================
+ * 音频上行任务 (麦克风 -> 服务器 端口 8888)
+ * =====================================================================
+ * @brief 通话时从 intercom_ringbuf 读取麦克风音频，发送到服务器
+ *
+ * 非通话状态：每 100ms 检查一次，不占 CPU 和网络
+ * 通话状态：连接 8888 端口，持续发送 PCM 音频
+ */
+static void network_audio_tx_task(void *pvParameters) {
+    vTaskDelay(pdMS_TO_TICKS(5000));  // 等待 WiFi 就绪
+
+    struct sockaddr_in dest_addr;
+    dest_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
+    dest_addr.sin_family = AF_INET;
+    dest_addr.sin_port = htons(PORT_A_IN);
+
+    while (1) {
+        // 未通话时休眠待机
+        while (!is_in_call) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+
+        // 建立音频上行连接
+        int tx_sock = socket(AF_INET, SOCK_STREAM, 0);
+        if (tx_sock < 0) { vTaskDelay(pdMS_TO_TICKS(1000)); continue; }
+
+        // TCP 无延迟，降低语音交互延迟
+        int op = 1;
+        setsockopt(tx_sock, IPPROTO_TCP, TCP_NODELAY, &op, sizeof(op));
+
+        ESP_LOGI("AUDIO_TX", "尝试连接音频上行通道 %d...", PORT_A_IN);
+        if (connect(tx_sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr)) != 0) {
+            close(tx_sock);
+            vTaskDelay(pdMS_TO_TICKS(2000));
+            continue;
+        }
+        ESP_LOGI("AUDIO_TX", "✅ 音频上行通道已建立！");
+
+        size_t item_size;
+        while (is_in_call) {
+            void *audio_data = xRingbufferReceive(intercom_ringbuf, &item_size, pdMS_TO_TICKS(100));
+            if (audio_data != NULL) {
+                int sent = send(tx_sock, audio_data, item_size, 0);
+                vRingbufferReturnItem(intercom_ringbuf, audio_data);
+                if (sent < 0) {
+                    ESP_LOGE("AUDIO_TX", "网络发送异常断开");
+                    break;
+                }
+            }
+        }
+
+        close(tx_sock);
+        ESP_LOGI("AUDIO_TX", "音频上行通道已关闭");
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+}
+
+/* =====================================================================
+ * 音频下行任务 (服务器 端口 8889 -> 扬声器)
+ * =====================================================================
+ * @brief 通话时从服务器接收 PCM 音频，通过扬声器播放
+ *
+ * 非通话状态：每 100ms 检查一次
+ * 通话状态：连接 8889 端口，持续接收并播放
+ * recv 超时 500ms，防止挂断时死锁
+ */
+static void network_audio_rx_task(void *pvParameters) {
+    vTaskDelay(pdMS_TO_TICKS(5000));  // 等待 WiFi 就绪
+
+    struct sockaddr_in dest_addr;
+    dest_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
+    dest_addr.sin_family = AF_INET;
+    dest_addr.sin_port = htons(PORT_A_OUT);
+
+    while (1) {
+        // 未通话时休眠待机
+        while (!is_in_call) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+
+        // 建立音频下行连接
+        int rx_sock = socket(AF_INET, SOCK_STREAM, 0);
+        if (rx_sock < 0) { vTaskDelay(pdMS_TO_TICKS(1000)); continue; }
+
+        // 设置接收超时 500ms，防止挂断时 recv 死锁
+        struct timeval timeout = { .tv_sec = 0, .tv_usec = 500000 };
+        setsockopt(rx_sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+        ESP_LOGI("AUDIO_RX", "尝试连接音频下行通道 %d...", PORT_A_OUT);
+        if (connect(rx_sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr)) != 0) {
+            close(rx_sock);
+            vTaskDelay(pdMS_TO_TICKS(2000));
+            continue;
+        }
+        ESP_LOGI("AUDIO_RX", "✅ 音频下行通道已建立！");
+
+        uint8_t recv_buf[1024];
+        while (is_in_call) {
+            int len = recv(rx_sock, recv_buf, sizeof(recv_buf), 0);
+            if (len > 0) {
+                playSpeaker(recv_buf, len);  // 直接播放 PCM 音频
+            } else if (len == 0) {
+                ESP_LOGW("AUDIO_RX", "云端主动断开连接");
+                break;
+            }
+            // len < 0 (超时) 继续循环检查 is_in_call
+        }
+
+        close(rx_sock);
+        ESP_LOGI("AUDIO_RX", "音频下行通道已关闭");
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+}
+
+/* =====================================================================
  * app_main - 系统入口函数
  * =====================================================================
  * @brief ESP-IDF 应用程序入口点，按顺序完成所有模块的初始化
@@ -618,6 +908,7 @@ void app_main(void) {
     yin_ringbuf = xRingbufferCreate(8192,  RINGBUF_TYPE_NOSPLIT);  // YIN测音
     sr_ringbuf  = xRingbufferCreate(16384, RINGBUF_TYPE_NOSPLIT);  // 语音唤醒 (稍大，避免丢帧)
     ai_ringbuf  = xRingbufferCreate(16384, RINGBUF_TYPE_NOSPLIT);  // AI 对话 (Opus 编码)
+    intercom_ringbuf = xRingbufferCreate(16384, RINGBUF_TYPE_NOSPLIT);  // 网络对讲
 
     if (sd_ringbuf == NULL) {
         ESP_LOGE(TAG, "❌ 致命错误：音频环形缓冲区创建失败！");
@@ -634,6 +925,16 @@ void app_main(void) {
     start_jarvis_brain();   // "Jarvis" 唤醒词检测引擎 (WakeNet9 + AFE)
     wifi_init_sta();        // WiFi STA 连接 (AI 对话依赖网络)
     ai_chat_init();         // AI 语音对话模块 (WebSocket + Opus)
+
+    /* ---- 初始化 MQTT 客户端 (用于定时发布噪声数据) ---- */
+    esp_mqtt_client_config_t mqtt_cfg = {
+        .broker.address.uri = "mqtt://124.220.224.189:1883",
+        .credentials.username = "RUN",
+        .credentials.authentication.password = "88888888",
+    };
+    s_mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
+    esp_mqtt_client_start(s_mqtt_client);
+    ESP_LOGI(TAG, "MQTT 客户端已启动");
 
     /* ---- 步骤7: 创建小说翻页信号量 ---- */
     next_page_sem = xSemaphoreCreateBinary();
@@ -666,8 +967,24 @@ void app_main(void) {
         }
     }
 
+    // 3. 网络通话三任务 (信令 + 音频上行 + 音频下行) — 栈分配到 PSRAM 节省内部 SRAM
+    {
+        static StackType_t *sig_stack = NULL, *tx_stack = NULL, *rx_stack = NULL;
+        static StaticTask_t sig_tcb, tx_tcb, rx_tcb;
+        if (!sig_stack) sig_stack = heap_caps_malloc(4096, MALLOC_CAP_SPIRAM);
+        if (!tx_stack)  tx_stack  = heap_caps_malloc(8192, MALLOC_CAP_SPIRAM);
+        if (!rx_stack)  rx_stack  = heap_caps_malloc(8192, MALLOC_CAP_SPIRAM);
+        if (sig_stack) xTaskCreateStaticPinnedToCore(signaling_task, "sig_task", 4096, NULL, 6, sig_stack, &sig_tcb, 1);
+        if (tx_stack)  xTaskCreateStaticPinnedToCore(network_audio_tx_task, "net_tx_task", 8192, NULL, 5, tx_stack, &tx_tcb, 1);
+        if (rx_stack)  xTaskCreateStaticPinnedToCore(network_audio_rx_task, "net_rx_task", 8192, NULL, 5, rx_stack, &rx_tcb, 1);
+        ESP_LOGI(TAG, "网络任务栈已分配到 PSRAM (20KB)");
+    }
+
+    // 4. MQTT 噪声数据定时发布任务
+    xTaskCreate(mqtt_noise_task, "mqtt_noise", 4096, NULL, 3, NULL);
+
     /* ---- 步骤10: TTS 播报启动欢迎语 ---- */
-    tts_speak("贾维斯系统已启动。主脑连接成功，正在等待指令。");
+    tts_speak("贾维斯系统已启动");
 
     /* ---- 主线程进入空循环 ---- */
     // 所有实际工作都由上面创建的子任务完成

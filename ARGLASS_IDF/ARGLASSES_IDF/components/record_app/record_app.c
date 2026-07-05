@@ -62,6 +62,7 @@
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "esp_camera.h"        // 摄像头驱动
+#include "esp_http_client.h"   // HTTP 客户端 (用于上传文件)
 
 /* ==================== 项目组件头文件 ==================== */
 #include "record_app.h"
@@ -78,6 +79,9 @@ extern RingbufHandle_t sd_ringbuf;
 
 static const char *TAG = "RECORD_APP";  // 日志标签
 
+// 前向声明：录音结束后自动触发的上传任务
+static void upload_task_worker(void *arg);
+
 /* =====================================================================
  * 录音状态控制变量
  * ===================================================================== */
@@ -85,6 +89,7 @@ volatile bool is_recording = false;            // 录音状态标志
 static FILE *record_file = NULL;               // 当前录音文件句柄
 static uint32_t total_written_bytes = 0;       // 已写入的总字节数
 static TaskHandle_t record_task_handle = NULL; // 录音任务句柄
+char current_record_path[64] = {0};            // 当前录音文件路径 (供上传任务使用)
 
 /* =====================================================================
  * WAV 文件头生成函数
@@ -197,14 +202,28 @@ static void record_task_worker(void *arg) {
 
     /* ---- 录音结束：生成最终 WAV 文件 ---- */
     ESP_LOGI(TAG, "收到停止信号，正在生成最终 WAV 文件...");
+
+    // 保存文件路径用于上传
+    char *upload_path = NULL;
+
     if (record_file != NULL) {
         // 回到文件开头，更新 WAV 头中的数据大小
         write_wav_header(record_file, SAMPLE_RATE, 16, 1, total_written_bytes);
+
+        // 获取当前录音文件路径
+        extern char current_record_path[];
+        upload_path = strdup(current_record_path);
+
         fclose(record_file);
         record_file = NULL;
     }
 
     ESP_LOGI(TAG, "✅ 录音安全结束！共写入: %lu 字节", total_written_bytes);
+
+    // 录音结束后自动触发上传任务
+    if (upload_path != NULL) {
+        xTaskCreate(upload_task_worker, "wav_upload", 8192, (void *)upload_path, 3, NULL);
+    }
 
     record_task_handle = NULL;
     vTaskDelete(NULL);  // 删除自身任务
@@ -240,6 +259,9 @@ esp_err_t start_record(void) {
         ESP_LOGE(TAG, "❌ 无法创建录音文件！请检查 SD 卡及目录权限。");
         return ESP_FAIL;
     }
+
+    // 保存文件路径供上传任务使用
+    strncpy(current_record_path, filepath, sizeof(current_record_path) - 1);
 
     /* ---- 写入占位 WAV 头 (数据大小为 0，录音结束后更新) ---- */
     total_written_bytes = 0;
@@ -278,6 +300,134 @@ void stop_record(void) {
     } else {
         ESP_LOGW(TAG, "当前并没有在录音。");
     }
+}
+
+/* =====================================================================
+ * WAV 文件流式上传功能
+ * =====================================================================
+ * @brief 从 SD 卡读取 WAV 文件并使用 multipart/form-data 流式上传到云服务器
+ *
+ * 每次只读 2KB，不会撑爆内存。
+ * 上传完成后自动删除本地文件（可选）。
+ */
+
+// 上传服务器地址（请替换为实际地址）
+#define UPLOAD_SERVER_URL "http://124.220.224.189:5000/upload_audio"
+
+/**
+ * @brief 上传单个 WAV 文件到服务器
+ * @param file_path SD 卡中的文件绝对路径
+ */
+static void upload_wav_from_sd(const char *file_path) {
+    // 1. 获取文件大小
+    struct stat st;
+    if (stat(file_path, &st) != 0) {
+        ESP_LOGE(TAG, "❌ 无法获取文件信息: %s", file_path);
+        return;
+    }
+    size_t file_size = st.st_size;
+    ESP_LOGI(TAG, "📤 准备上传: %s (%d bytes)", file_path, file_size);
+
+    // 2. 打开文件
+    FILE *file = fopen(file_path, "rb");
+    if (file == NULL) {
+        ESP_LOGE(TAG, "❌ 无法打开文件: %s", file_path);
+        return;
+    }
+
+    // 3. 配置 HTTP 客户端
+    esp_http_client_config_t config = {
+        .url = UPLOAD_SERVER_URL,
+        .method = HTTP_METHOD_POST,
+        .timeout_ms = 15000,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+
+    // 4. multipart/form-data 报文
+    const char *boundary = "----JarvisAudioBoundary";
+    char content_type[64];
+    snprintf(content_type, sizeof(content_type), "multipart/form-data; boundary=%s", boundary);
+    esp_http_client_set_header(client, "Content-Type", content_type);
+
+    const char *filename = strrchr(file_path, '/');
+    filename = (filename != NULL) ? filename + 1 : "record.wav";
+
+    char head[256];
+    int head_len = snprintf(head, sizeof(head),
+        "--%s\r\n"
+        "Content-Disposition: form-data; name=\"file\"; filename=\"%s\"\r\n"
+        "Content-Type: audio/wav\r\n\r\n",
+        boundary, filename);
+
+    char tail[64];
+    int tail_len = snprintf(tail, sizeof(tail), "\r\n--%s--\r\n", boundary);
+
+    // 5. 打开连接
+    ESP_LOGI(TAG, "UPLOAD_SERVER_URL = %s", UPLOAD_SERVER_URL);
+    int total_len = head_len + file_size + tail_len;
+    esp_err_t err = esp_http_client_open(client, total_len);
+    ESP_LOGI(TAG, "esp_http_client_open ret = %s", esp_err_to_name(err));
+
+    if (err == ESP_OK) {
+        // 6. 发送头部
+        esp_http_client_write(client, head, head_len);
+
+        // 7. 分块读取并发送 (每次 2KB)
+        char read_buf[2048];
+        size_t bytes_read;
+        size_t total_sent = 0;
+
+        while ((bytes_read = fread(read_buf, 1, sizeof(read_buf), file)) > 0) {
+            int write_len = esp_http_client_write(client, read_buf, bytes_read);
+            if (write_len < 0) {
+                ESP_LOGE(TAG, "❌ 网络发送失败！");
+                break;
+            }
+            total_sent += write_len;
+        }
+
+        // 8. 发送尾部
+        esp_http_client_write(client, tail, tail_len);
+
+        // 9. 获取服务器响应
+        esp_http_client_fetch_headers(client);
+        int status_code = esp_http_client_get_status_code(client);
+
+        if (status_code == 200) {
+            char resp[128] = {0};
+            esp_http_client_read_response(client, resp, sizeof(resp) - 1);
+            ESP_LOGI(TAG, "✅ 上传成功！服务器回复: %s", resp);
+        } else {
+            ESP_LOGE(TAG, "❌ 上传失败，状态码: %d", status_code);
+        }
+    } else {
+        ESP_LOGE(TAG, "❌ 无法连接服务器: %s", esp_err_to_name(err));
+    }
+
+    // 10. 清理
+    fclose(file);
+    esp_http_client_cleanup(client);
+}
+
+/**
+ * @brief 上传任务 (录音结束后自动触发)
+ *
+ * "阅后即焚"：上传完成或失败后自动删除任务
+ * 优先级: 3 (低于录音和音频任务)
+ * 栈大小: 8192 字节
+ */
+static void upload_task_worker(void *arg) {
+    char *file_path = (char *)arg;
+
+    ESP_LOGI(TAG, "📤 上传任务启动: %s", file_path);
+    upload_wav_from_sd(file_path);
+
+    // 上传完成后可选：删除本地文件节省空间
+    // remove(file_path);
+
+    ESP_LOGI(TAG, "📤 上传任务完成");
+    free(file_path);
+    vTaskDelete(NULL);
 }
 
 /* =====================================================================

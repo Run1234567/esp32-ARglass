@@ -37,4 +37,10 @@ void my_uart_init(void);
  */
 void my_uart_send(const char* data);
 
+/**
+ * @brief 向 UI MCU 发送 AI 字幕
+ * @param text 字幕文本
+ */
+void ui_update_subtitle(const char *text);
+
 #endif // MY_UART_H
