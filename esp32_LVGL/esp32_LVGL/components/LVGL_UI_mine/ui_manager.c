@@ -182,6 +182,29 @@ void switch_to_screen(ui_screen_state_t target_screen) {
 //   手势指令分发器 —— 状态机路由表 (已加入画圈动作)
 // ============================================================
 static void process_ui_command(ui_cmd_t cmd) {
+    // 全局屏幕跳转（MQTT/网页远程控制）
+    switch (cmd) {
+        case UI_CMD_GOTO_AR:        switch_to_screen(SCREEN_MAIN_AR); return;
+        case UI_CMD_GOTO_MENU:      switch_to_screen(SCREEN_MENU); return;
+        case UI_CMD_GOTO_NOVEL:     switch_to_screen(SCREEN_NOVEL); return;
+        case UI_CMD_GOTO_CLOCK:     switch_to_screen(SCREEN_CLOCK); return;
+        case UI_CMD_GOTO_RECORD:    switch_to_screen(SCREEN_RECORD); return;
+        case UI_CMD_GOTO_PLAYLIST:  switch_to_screen(SCREEN_PLAYLIST); return;
+        case UI_CMD_GOTO_CAMERA:    switch_to_screen(SCREEN_CAMERA); return;
+        case UI_CMD_GOTO_NOISE:     switch_to_screen(SCREEN_NOISE); return;
+        case UI_CMD_GOTO_PITCH:     switch_to_screen(SCREEN_PITCH); return;
+        case UI_CMD_GOTO_MUSIC:     switch_to_screen(SCREEN_MUSIC); return;
+        case UI_CMD_GOTO_LIGHT:     switch_to_screen(SCREEN_LIGHT); return;
+        case UI_CMD_GOTO_HEALTH:    switch_to_screen(SCREEN_HEALTH); return;
+        case UI_CMD_GOTO_WIFI:      switch_to_screen(SCREEN_WIFI_SCAN); return;
+        case UI_CMD_GOTO_GPS:       switch_to_screen(SCREEN_GPS); return;
+        case UI_CMD_GOTO_AI:        switch_to_screen(SCREEN_AI_CHAT); return;
+        case UI_CMD_GOTO_CALL:      switch_to_screen(SCREEN_CALL); return;
+        case UI_CMD_GOTO_AUDIO:     switch_to_screen(SCREEN_AUDIO_SWITCH); return;
+        case UI_CMD_GOTO_GAME_LIST: switch_to_screen(SCREEN_GAME_LIST); return;
+        default: break;
+    }
+
     switch (current_screen) {
 
         // ---- AR 主视界 ----

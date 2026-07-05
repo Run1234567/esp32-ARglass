@@ -169,6 +169,25 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                 else if (strcmp(cmd_str, "LEFT") == 0)    cmd = UI_CMD_LEFT;
                 else if (strcmp(cmd_str, "RIGHT") == 0)   cmd = UI_CMD_RIGHT;
                 else if (strcmp(cmd_str, "OK") == 0)      cmd = UI_CMD_CIRCLE;
+                // 全局屏幕跳转
+                else if (strcmp(cmd_str, "GOTO_AR") == 0)        cmd = UI_CMD_GOTO_AR;
+                else if (strcmp(cmd_str, "GOTO_MENU") == 0)      cmd = UI_CMD_GOTO_MENU;
+                else if (strcmp(cmd_str, "GOTO_NOVEL") == 0)     cmd = UI_CMD_GOTO_NOVEL;
+                else if (strcmp(cmd_str, "GOTO_CLOCK") == 0)     cmd = UI_CMD_GOTO_CLOCK;
+                else if (strcmp(cmd_str, "GOTO_RECORD") == 0)    cmd = UI_CMD_GOTO_RECORD;
+                else if (strcmp(cmd_str, "GOTO_PLAYLIST") == 0)  cmd = UI_CMD_GOTO_PLAYLIST;
+                else if (strcmp(cmd_str, "GOTO_CAMERA") == 0)    cmd = UI_CMD_GOTO_CAMERA;
+                else if (strcmp(cmd_str, "GOTO_NOISE") == 0)     cmd = UI_CMD_GOTO_NOISE;
+                else if (strcmp(cmd_str, "GOTO_PITCH") == 0)     cmd = UI_CMD_GOTO_PITCH;
+                else if (strcmp(cmd_str, "GOTO_MUSIC") == 0)     cmd = UI_CMD_GOTO_MUSIC;
+                else if (strcmp(cmd_str, "GOTO_LIGHT") == 0)     cmd = UI_CMD_GOTO_LIGHT;
+                else if (strcmp(cmd_str, "GOTO_HEALTH") == 0)    cmd = UI_CMD_GOTO_HEALTH;
+                else if (strcmp(cmd_str, "GOTO_WIFI") == 0)      cmd = UI_CMD_GOTO_WIFI;
+                else if (strcmp(cmd_str, "GOTO_GPS") == 0)       cmd = UI_CMD_GOTO_GPS;
+                else if (strcmp(cmd_str, "GOTO_AI") == 0)        cmd = UI_CMD_GOTO_AI;
+                else if (strcmp(cmd_str, "GOTO_CALL") == 0)      cmd = UI_CMD_GOTO_CALL;
+                else if (strcmp(cmd_str, "GOTO_AUDIO") == 0)     cmd = UI_CMD_GOTO_AUDIO;
+                else if (strcmp(cmd_str, "GOTO_GAME_LIST") == 0) cmd = UI_CMD_GOTO_GAME_LIST;
 
                 // 如果按键有效且 UI 队列已初始化，则塞入队列传递给 UI 线程
                 if (cmd != UI_CMD_NONE && ui_cmd_queue != NULL) {

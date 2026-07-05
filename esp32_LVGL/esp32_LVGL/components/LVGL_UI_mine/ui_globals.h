@@ -36,7 +36,27 @@ typedef enum {
     UI_CMD_CIRCLE,     // 画圈手势
     UI_CMD_FORWARD,    // 向前靠近
     UI_CMD_BACKWARD,   // 向后远离
-    UI_CMD_WAVE        // 快速挥手
+    UI_CMD_WAVE,       // 快速挥手
+
+    // 全局屏幕跳转指令
+    UI_CMD_GOTO_AR,
+    UI_CMD_GOTO_MENU,
+    UI_CMD_GOTO_NOVEL,
+    UI_CMD_GOTO_CLOCK,
+    UI_CMD_GOTO_RECORD,
+    UI_CMD_GOTO_PLAYLIST,
+    UI_CMD_GOTO_CAMERA,
+    UI_CMD_GOTO_NOISE,
+    UI_CMD_GOTO_PITCH,
+    UI_CMD_GOTO_MUSIC,
+    UI_CMD_GOTO_LIGHT,
+    UI_CMD_GOTO_HEALTH,
+    UI_CMD_GOTO_WIFI,
+    UI_CMD_GOTO_GPS,
+    UI_CMD_GOTO_AI,
+    UI_CMD_GOTO_CALL,
+    UI_CMD_GOTO_AUDIO,
+    UI_CMD_GOTO_GAME_LIST
 } ui_cmd_t;
 
 // ============================================================
