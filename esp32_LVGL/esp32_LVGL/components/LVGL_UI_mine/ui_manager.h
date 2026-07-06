@@ -42,6 +42,7 @@ typedef enum {
     SCREEN_GAME_NOTE,    // 15. 声控八分音符酱
     SCREEN_GAME_TETRIS,  // 16. 俄罗斯方块
     SCREEN_GAME_MOLE,    // 17. 打地鼠
+    SCREEN_VIDEO,        // 18. AR 录像机
     SCREEN_GAME_SNAKE,   // 18. 贪吃蛇
     SCREEN_GAME_RHYTHM,  // 19. 节奏魔杖
     SCREEN_GAME_SIMON,   // 20. 记忆大师

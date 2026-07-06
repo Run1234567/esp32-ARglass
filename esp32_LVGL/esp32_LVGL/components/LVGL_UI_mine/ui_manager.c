@@ -47,6 +47,7 @@
 #include "ui_ai_screen.h"       // AI 字幕
 #include "ui_call_screen.h"    // 网络通话
 #include "ui_audio_switch_screen.h" // 音频切换
+#include "ui_video_screen.h"       // AR 录像机
 #include "max30102.h"          // MAX30102 心率传感器
 #include "my_uart.h"           // UART 串口通信模块
 
@@ -109,6 +110,7 @@ void switch_to_screen(ui_screen_state_t target_screen) {
         case SCREEN_AUDIO_SWITCH: target_obj = ui_audio_switch_screen; break;
         case SCREEN_LIGHT:       target_obj = ui_light_screen;     break;
         case SCREEN_HEALTH:      target_obj = ui_health_screen;    break;
+        case SCREEN_VIDEO:       target_obj = ui_video_screen;     break;
         default: return; 
     }
 
@@ -251,6 +253,7 @@ static void process_ui_command(ui_cmd_t cmd) {
                 if (selected_idx == 14) switch_to_screen(SCREEN_GPS);
                 if (selected_idx == 15) switch_to_screen(SCREEN_CALL);
                 if (selected_idx == 16) switch_to_screen(SCREEN_AUDIO_SWITCH);
+                if (selected_idx == 17) switch_to_screen(SCREEN_VIDEO);
             }
             break;
 
@@ -361,6 +364,10 @@ static void process_ui_command(ui_cmd_t cmd) {
             health_screen_handle_cmd(cmd);
             break;
 
+        case SCREEN_VIDEO:
+            video_screen_handle_cmd(cmd);
+            break;
+
         default:
             break;
     }
@@ -413,7 +420,8 @@ void ui_manager_init(void) {
         ui_call_screen_init();
         ui_audio_switch_screen_init();
         ui_light_screen_init();      
-        ui_health_screen_init();     
+        ui_health_screen_init();
+        ui_video_screen_init();
 
         lv_scr_load(ui_main_screen);
         lvgl_port_unlock();
