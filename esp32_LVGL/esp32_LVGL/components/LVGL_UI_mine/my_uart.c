@@ -167,22 +167,26 @@ static void uart_event_task(void *pvParameters) {
                     // 通话状态通知（核心板 → UI 板）
                     else if (strncmp((char*)dtmp, "NTF:RING", 8) == 0) {
                         extern void ui_enter_ringing_mode(void);
-                        if (lvgl_port_lock(0)) {
+                        extern void switch_to_screen(ui_screen_state_t target_screen);
+                        if (lvgl_port_lock(-1)) {
+                            switch_to_screen(SCREEN_CALL);
                             ui_enter_ringing_mode();
                             lvgl_port_unlock();
                         }
                     }
                     else if (strncmp((char*)dtmp, "NTF:CALL_ESTABLISHED", 20) == 0) {
-                        extern volatile bool is_calling_now;
-                        is_calling_now = true;
-                        ESP_LOGI("CALL_NTF", "通话已建立");
+                        extern void ui_call_established(void);
+                        if (lvgl_port_lock(-1)) {
+                            ui_call_established();
+                            lvgl_port_unlock();
+                        }
                     }
                     else if (strncmp((char*)dtmp, "NTF:CALL_END", 12) == 0) {
-                        extern volatile bool is_ringing_now;
-                        extern volatile bool is_calling_now;
-                        is_ringing_now = false;
-                        is_calling_now = false;
-                        ESP_LOGI("CALL_NTF", "通话已结束");
+                        extern void ui_call_ended(void);
+                        if (lvgl_port_lock(-1)) {
+                            ui_call_ended();
+                            lvgl_port_unlock();
+                        }
                     }
                     else if (strstr((char*)dtmp, "MU_CLEAR:1") != NULL) {
                         extern void music_clear_playlist(void);

@@ -160,8 +160,8 @@ void call_screen_handle_cmd(ui_cmd_t cmd) {
     else if (cmd == UI_CMD_RIGHT) {
         if (!is_calling_now) {
             is_calling_now = true;
-            lv_label_set_text(label_status, "正在通话中...\n左滑挂断");
-            lv_obj_set_style_text_color(label_status, lv_color_hex(0x00FF00), 0);
+            lv_label_set_text(label_status, "正在呼叫中...\n等待接听");
+            lv_obj_set_style_text_color(label_status, lv_color_hex(0xFFA500), 0);
             update_contact_ui();
             ESP_LOGI(TAG, "发起呼叫");
             my_uart_send("CMD:CALL_START\r\n");
@@ -180,4 +180,30 @@ void call_screen_handle_cmd(ui_cmd_t cmd) {
             switch_to_screen(SCREEN_MENU);
         }
     }
+}
+
+// ============================================================
+//   供串口任务调用的状态控制 API
+// ============================================================
+
+// 收到 NTF:CALL_ESTABLISHED（对方接听）时调用
+void ui_call_established(void) {
+    is_calling_now = true;
+    is_ringing_now = false;
+    lv_scr_load(ui_call_screen);
+    lv_label_set_text(label_status, "正在通话中...\n左滑挂断");
+    lv_obj_set_style_text_color(label_status, lv_color_hex(0x00FF00), 0);
+    update_contact_ui();
+    ESP_LOGI(TAG, "通话已接通");
+}
+
+// 收到 NTF:CALL_END（挂断/远端挂断）时调用
+void ui_call_ended(void) {
+    is_calling_now = false;
+    is_ringing_now = false;
+    lv_scr_load(ui_call_screen);
+    lv_label_set_text(label_status, "右滑呼叫 | 左滑退出");
+    lv_obj_set_style_text_color(label_status, lv_color_hex(0xFFFF00), 0);
+    update_contact_ui();
+    ESP_LOGI(TAG, "通话已结束");
 }

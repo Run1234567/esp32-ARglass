@@ -18,7 +18,7 @@ static const char *TAG = "PAJ7620";
 #define PAJ7620_SDA         39
 #define PAJ7620_I2C_PORT    I2C_NUM_1
 #define PAJ7620_I2C_FREQ    10000
-#define PAJ7620_ADDR        0x73
+static uint8_t paj7620_addr = 0x73; // 运行时自动探测
 #define PAJ7620_TIMEOUT     1000
 
 // ---- 任务配置 ----
@@ -54,12 +54,12 @@ static const uint16_t gesture_mode_array[] = {
 // ============================================================
 static esp_err_t paj7620_write_reg(uint8_t reg_addr, uint8_t data) {
     uint8_t buf[2] = {reg_addr, data};
-    return i2c_master_write_to_device(PAJ7620_I2C_PORT, PAJ7620_ADDR, buf, 2, PAJ7620_TIMEOUT / portTICK_PERIOD_MS);
+    return i2c_master_write_to_device(PAJ7620_I2C_PORT, paj7620_addr, buf, 2, PAJ7620_TIMEOUT / portTICK_PERIOD_MS);
 }
 
 // 升级版：支持读取指定长度的连续寄存器内容
 static esp_err_t paj7620_read_regs(uint8_t start_reg, uint8_t *data_buf, size_t len) {
-    return i2c_master_write_read_device(PAJ7620_I2C_PORT, PAJ7620_ADDR, &start_reg, 1, data_buf, len, PAJ7620_TIMEOUT / portTICK_PERIOD_MS);
+    return i2c_master_write_read_device(PAJ7620_I2C_PORT, paj7620_addr, &start_reg, 1, data_buf, len, PAJ7620_TIMEOUT / portTICK_PERIOD_MS);
 }
 
 static void paj7620_wakeup(void) {
@@ -109,16 +109,37 @@ esp_err_t paj7620_init(void) {
         return err;
     }
 
-    paj7620_wakeup();
-    paj7620_write_reg(0xEF, 0x00);
-
+    // 尝试两个可能的地址（0x73 和 0x70）
     uint8_t part_id = 0;
-    // 这里也可以重构使用新的读取函数
-    paj7620_read_regs(0x00, &part_id, 1);
-    if (part_id != 0x20) {
-        ESP_LOGE(TAG, "Chip ID mismatch: 0x%02X (expected 0x20)", part_id);
+    uint8_t try_addrs[] = {0x73, 0x70};
+    bool found = false;
+    for (int a = 0; a < 2; a++) {
+        // 临时用这个地址发唤醒命令
+        uint8_t dummy = 0;
+        i2c_master_write_to_device(PAJ7620_I2C_PORT, try_addrs[a], &dummy, 1, 50 / portTICK_PERIOD_MS);
+        vTaskDelay(pdMS_TO_TICKS(5));
+
+        // 写 Bank 0 并读芯片 ID
+        uint8_t buf[2] = {0xEF, 0x00};
+        i2c_master_write_to_device(PAJ7620_I2C_PORT, try_addrs[a], buf, 2, 100 / portTICK_PERIOD_MS);
+        uint8_t reg = 0x00;
+        i2c_master_write_read_device(PAJ7620_I2C_PORT, try_addrs[a], &reg, 1, &part_id, 1, 100 / portTICK_PERIOD_MS);
+
+        ESP_LOGI(TAG, "地址 0x%02X -> Chip ID: 0x%02X", try_addrs[a], part_id);
+        if (part_id == 0x20) {
+            // 找到了！更新全局地址
+            paj7620_addr = try_addrs[a];
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        ESP_LOGE(TAG, "PAJ7620 未找到！检查接线 (SCL:%d SDA:%d)", PAJ7620_SCL, PAJ7620_SDA);
         return ESP_FAIL;
     }
+
+    paj7620_wakeup();
+    paj7620_write_reg(0xEF, 0x00);
 
     if (paj7620_write_array(init_array, sizeof(init_array) / sizeof(init_array[0])) != ESP_OK) return ESP_FAIL;
     if (paj7620_write_array(gesture_mode_array, sizeof(gesture_mode_array) / sizeof(gesture_mode_array[0])) != ESP_OK) return ESP_FAIL;
