@@ -1,13 +1,17 @@
 /**
  * @file camera_app.h
- * @brief 摄像头初始化与拍照模块公共接口
+ * @brief 摄像头初始化、拍照与视频推流模块公共接口
  *
- * 本模块管理 OV2640 并行摄像头，提供 JPEG 格式的拍照功能。
- * 图像分辨率: UXGA (1600x1200)，帧缓冲存储在 PSRAM 中。
+ * 本模块管理 OV2640 并行摄像头，提供:
+ *   - JPEG 格式拍照 (UXGA 1600x1200)
+ *   - HTTP 照片上传
+ *   - TCP 视频实时推流 (VGA 640x480, ~15FPS)
  */
 
 #ifndef CAMERA_APP_H
 #define CAMERA_APP_H
+
+#include <stdbool.h>   // bool 类型定义
 
 /**
  * @brief 初始化摄像头
@@ -32,5 +36,21 @@ void take_photo_to_PZ_folder(void);
  * 耗时约 1 秒。拍照完成后通过 UART 发送 "CMD:PHOTO_DONE"。
  */
 void execute_high_res_capture(void);
+
+/**
+ * @brief 视频推流状态标志
+ * true = 正在推流，false = 停止推流
+ * 由 my_uart.c 通过 CMD:VIDEO_START/STOP 控制
+ */
+extern volatile bool is_video_recording;
+
+/**
+ * @brief 视频推流任务
+ *
+ * 将摄像头 JPEG 帧通过 TCP 推送到云服务器 8890 端口。
+ * 协议: [4字节长度] + [JPEG数据]，约 15 FPS。
+ * 不通话时休眠待机，不占 CPU。
+ */
+void video_stream_task(void *pvParameters);
 
 #endif // CAMERA_APP_H

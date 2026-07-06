@@ -38,6 +38,8 @@
 #include <sys/stat.h>         // mkdir 等文件系统操作
 #include "sd_card_app.h"      // MOUNT_POINT 定义
 #include "esp_http_client.h"  // HTTP 客户端 (用于上传照片)
+#include "lwip/sockets.h"    // TCP Socket (用于视频推流)
+#include "esp_timer.h"       // 高精度时间戳 (用于视频帧时间标记)
 
 static const char *TAG = "CAMERA_APP";  // 日志标签
 
@@ -47,6 +49,14 @@ static const char *TAG = "CAMERA_APP";  // 日志标签
  * 由 execute_high_res_capture() 设置/清除
  */
 volatile bool is_capturing = false;
+
+/**
+ * @brief 视频推流状态标志
+ * 由 UI MCU 通过 UART 命令控制:
+ *   CMD:VIDEO_START -> is_video_recording = true
+ *   CMD:VIDEO_STOP  -> is_video_recording = false
+ */
+volatile bool is_video_recording = false;
 
 /* =====================================================================
  * 高分辨率拍照执行函数
@@ -173,7 +183,7 @@ void initCamera(void) {
     /* ---- 图像参数 ---- */
     config.frame_size = FRAMESIZE_UXGA;        // 1600x1200 分辨率
     config.pixel_format = PIXFORMAT_JPEG;      // JPEG 硬件压缩格式
-    config.grab_mode = CAMERA_GRAB_WHEN_EMPTY; // 缓存空时自动采集
+    config.grab_mode = CAMERA_GRAB_LATEST;     // 疯狂连拍模式，始终采集最新画面
     config.fb_location = CAMERA_FB_IN_PSRAM;   // 帧缓冲存放在 PSRAM
     config.fb_count = 2;                       // 双缓冲
     config.jpeg_quality = 12;                  // JPEG 质量 (0-63)
@@ -264,6 +274,108 @@ static void upload_photo_to_server(camera_fb_t *pic) {
 
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
+}
+
+/* =====================================================================
+ * 视频推流任务 (TCP 端口 8890)
+ * =====================================================================
+ * @brief 将摄像头 JPEG 帧通过 TCP 实时推送到云服务器
+ *
+ * 协议: [4字节长度 (小端序)] + [JPEG 数据]
+ * 帧率: 约 15 FPS (每帧延时 60ms)
+ * 分辨率: VGA (640x480) 以提高帧率
+ *
+ * 工作模式:
+ *   - is_video_recording = false: 休眠待机
+ *   - is_video_recording = true:  连接服务器，持续推流
+ *   - 推流结束: 恢复 UXGA 高分辨率拍照模式
+ *
+ * 优先级: 4
+ * 栈大小: 8192 字节
+ * 核心绑定: Core 1
+ */
+#define VIDEO_SERVER_IP   "124.220.224.189"
+#define VIDEO_SERVER_PORT 8890
+
+void video_stream_task(void *pvParameters) {
+    struct sockaddr_in dest_addr;
+    dest_addr.sin_addr.s_addr = inet_addr(VIDEO_SERVER_IP);
+    dest_addr.sin_family = AF_INET;
+    dest_addr.sin_port = htons(VIDEO_SERVER_PORT);
+
+    while (1) {
+        // 休眠等待 UI 触发
+        while (!is_video_recording) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+
+        ESP_LOGI(TAG, "🎥 开始视频推流...");
+
+        // 切换到 VGA 分辨率 + 低画质 (图片压缩到 ~10KB)
+        sensor_t *s = esp_camera_sensor_get();
+        s->set_framesize(s, FRAMESIZE_VGA);
+        s->set_quality(s, 22);  // 降低画质，大幅减小图片体积
+
+        // 丢弃前 5 帧，确保传感器输出已经是 VGA 数据
+        for (int i = 0; i < 5; i++) {
+            camera_fb_t *fb = esp_camera_fb_get();
+            if (fb) esp_camera_fb_return(fb);
+            vTaskDelay(pdMS_TO_TICKS(30));
+        }
+        ESP_LOGI(TAG, "VGA 切换完成，开始推流...");
+
+        // 建立 TCP 连接
+        int sock = socket(AF_INET, SOCK_STREAM, 0);
+        if (sock < 0) {
+            is_video_recording = false;
+            continue;
+        }
+
+        if (connect(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr)) == 0) {
+            ESP_LOGI(TAG, "✅ 成功连接到视频服务器 %s:%d", VIDEO_SERVER_IP, VIDEO_SERVER_PORT);
+
+            while (is_video_recording) {
+                // 抓取一帧 JPEG
+                camera_fb_t *pic = esp_camera_fb_get();
+                if (!pic) {
+                    vTaskDelay(pdMS_TO_TICKS(50));
+                    continue;
+                }
+
+                // 按协议发送: [4字节长度] + [4字节时间戳] + [JPEG数据]
+                uint32_t len = pic->len;
+                uint32_t timestamp = (uint32_t)(esp_timer_get_time() / 1000);  // 微秒转毫秒
+
+                int send_res = send(sock, &len, 4, 0);          // 1. 发送 4 字节长度
+                if (send_res >= 0) {
+                    send_res = send(sock, &timestamp, 4, 0);     // 2. 发送 4 字节时间戳
+                }
+                if (send_res >= 0) {
+                    send_res = send(sock, pic->buf, pic->len, 0); // 3. 发送 JPEG 数据
+                }
+
+                esp_camera_fb_return(pic);  // 归还帧缓冲
+
+                if (send_res < 0) {
+                    ESP_LOGE(TAG, "网络断开，停止推流");
+                    break;
+                }
+
+                // 仅休眠 1 个 Tick 喂狗，让 CPU 狂奔推帧
+                vTaskDelay(1);
+            }
+        } else {
+            ESP_LOGE(TAG, "❌ 无法连接视频服务器");
+        }
+
+        close(sock);
+        is_video_recording = false;
+
+        // 恢复高分辨率 + 高画质拍照模式
+        s->set_framesize(s, FRAMESIZE_UXGA);
+        s->set_quality(s, 12);  // 恢复高质量拍照
+        ESP_LOGI(TAG, "⏹️ 视频推流已结束");
+    }
 }
 
 /* =====================================================================

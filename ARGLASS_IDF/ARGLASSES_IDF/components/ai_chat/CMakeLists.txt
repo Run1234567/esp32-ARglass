@@ -31,7 +31,7 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
     HAVE_LRINTF
 )
 
-# Disable strict warnings for opus source files
+# Disable strict warnings + 强制 -O2 优化 (Opus DSP 运算密集，-Os 会严重卡顿)
 set_source_files_properties(${OPUS_SOURCES} PROPERTIES
-    COMPILE_FLAGS "-Wno-error -Wno-stringop-overread -Wno-unused-parameter -Wno-sign-compare"
+    COMPILE_FLAGS "-O2 -Wno-error -Wno-stringop-overread -Wno-unused-parameter -Wno-sign-compare -Wno-error=maybe-uninitialized -Wno-maybe-uninitialized"
 )

@@ -27,7 +27,7 @@ static const char *TAG = "AI_AUDIO";
 #define OPUS_CHANNELS       1
 #define OPUS_BITRATE        16000
 #define OPUS_MAX_FRAME_BYTES 400
-#define OPUS_COMPLEXITY      5
+#define OPUS_COMPLEXITY      1  // 降到 1，大幅降低 CPU 占用 (语音场景够用)
 
 /* ==================== 异步播放队列 ==================== */
 #define PLAY_QUEUE_DEPTH    32      // 队列深度

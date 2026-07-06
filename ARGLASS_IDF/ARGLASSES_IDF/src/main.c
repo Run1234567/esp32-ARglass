@@ -97,6 +97,27 @@ esp_tts_handle_t *tts_handle = NULL;
 static const char *TAG = "J.A.R.V.I.S";  // 主程序日志前缀
 
 /* =====================================================================
+ * PSRAM RingBuffer 辅助函数
+ * =====================================================================
+ * @brief 在 PSRAM 中创建环形缓冲区，释放内部 SRAM
+ *
+ * 标准 xRingbufferCreate 使用内部 SRAM，5 个缓冲区会消耗 ~66KB。
+ * 此函数使用 xRingbufferCreateStatic + heap_caps_malloc 强制分配到 PSRAM。
+ */
+static RingbufHandle_t create_ringbuf_psram(size_t size, RingbufferType_t type) {
+    StaticRingbuffer_t *rb_struct = heap_caps_malloc(sizeof(StaticRingbuffer_t), MALLOC_CAP_SPIRAM);
+    uint8_t *rb_storage = heap_caps_malloc(size, MALLOC_CAP_SPIRAM);
+
+    if (rb_struct && rb_storage) {
+        return xRingbufferCreateStatic(size, type, rb_storage, rb_struct);
+    }
+    if (rb_struct) free(rb_struct);
+    if (rb_storage) free(rb_storage);
+    ESP_LOGE("MEM", "PSRAM RingBuffer 分配失败！");
+    return NULL;
+}
+
+/* =====================================================================
  * 网络通话配置 (三任务架构: 信令 + 音频上行 + 音频下行)
  * =====================================================================
  * 端口分配：
@@ -117,6 +138,12 @@ static const char *TAG = "J.A.R.V.I.S";  // 主程序日志前缀
  *   - 本地挂断        -> false
  */
 volatile bool is_in_call = false;
+
+/**
+ * @brief 视频录制标志 (定义在 camera_app.c)
+ * 用于 network_audio_tx_task 动态切换音频上行端口
+ */
+extern volatile bool is_video_recording;
 
 /**
  * @brief 信令 Socket 句柄 (供 handle_ui_action 发送信令用)
@@ -438,7 +465,7 @@ void audio_hub_task(void *pvParameters) {
             }
 
             /* ---- 6. 发送给网络对讲模块 ---- */
-            if (is_in_call && intercom_ringbuf != NULL) {
+            if ((is_in_call || is_video_recording) && intercom_ringbuf != NULL) {
                 // 超时 0：网络堵塞时直接丢弃，绝不卡死麦克风采集
                 xRingbufferSend(intercom_ringbuf, audioBuffer, bytesRead, 0);
             }
@@ -726,6 +753,7 @@ void handle_ui_action(const char *cmd) {
         // UI 点击接听 -> 发送 ACCEPT 信令
         send(sig_sock, "ACCEPT\n", 7, 0);
         is_in_call = true;  // 本地直接进入通话状态
+        my_uart_send("NTF:CALL_ESTABLISHED\r\n");  // 通知 UI 切换到"通话中"界面
         ESP_LOGI("SIG", "📤 发送接听信令");
     } else if (strstr(cmd, "CMD:CALL_END")) {
         // UI 点击挂断 -> 发送 HANGUP 信令
@@ -736,45 +764,67 @@ void handle_ui_action(const char *cmd) {
 }
 
 /* =====================================================================
- * 音频上行任务 (麦克风 -> 服务器 端口 8888)
+ * 音频上行任务 (麦克风 -> 服务器, 动态端口)
  * =====================================================================
- * @brief 通话时从 intercom_ringbuf 读取麦克风音频，发送到服务器
+ * @brief 根据当前状态动态切换音频上行端口：
+ *   - 网络电话 (is_in_call):       端口 8888
+ *   - 视频录制 (is_video_recording): 端口 8891
  *
- * 非通话状态：每 100ms 检查一次，不占 CPU 和网络
- * 通话状态：连接 8888 端口，持续发送 PCM 音频
+ * 两个状态互斥，优先视频录制。
+ * 非活跃状态：每 100ms 检查一次，不占 CPU 和网络。
  */
+#define PORT_AUDIO_CALL   8888   // 网络电话音频端口
+#define PORT_AUDIO_VIDEO  8891   // 视频录制音频端口
+
 static void network_audio_tx_task(void *pvParameters) {
     vTaskDelay(pdMS_TO_TICKS(5000));  // 等待 WiFi 就绪
 
     struct sockaddr_in dest_addr;
     dest_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
     dest_addr.sin_family = AF_INET;
-    dest_addr.sin_port = htons(PORT_A_IN);
 
     while (1) {
-        // 未通话时休眠待机
-        while (!is_in_call) {
+        // 1. 阻塞等待：电话或视频任一条件满足才启动
+        while (!is_in_call && !is_video_recording) {
             vTaskDelay(pdMS_TO_TICKS(100));
         }
 
-        // 建立音频上行连接
+        // 2. 动态决定目标端口
+        uint16_t target_port;
+        bool current_is_video = false;
+        bool current_is_call = false;
+
+        if (is_video_recording) {
+            target_port = PORT_AUDIO_VIDEO;
+            current_is_video = true;
+            ESP_LOGI("AUDIO_TX", "🎥 视频模式，音频发往端口 %d", target_port);
+        } else {
+            target_port = PORT_AUDIO_CALL;
+            current_is_call = true;
+            ESP_LOGI("AUDIO_TX", "📞 电话模式，音频发往端口 %d", target_port);
+        }
+
+        dest_addr.sin_port = htons(target_port);
+
+        // 3. 建立连接
         int tx_sock = socket(AF_INET, SOCK_STREAM, 0);
         if (tx_sock < 0) { vTaskDelay(pdMS_TO_TICKS(1000)); continue; }
 
-        // TCP 无延迟，降低语音交互延迟
         int op = 1;
         setsockopt(tx_sock, IPPROTO_TCP, TCP_NODELAY, &op, sizeof(op));
 
-        ESP_LOGI("AUDIO_TX", "尝试连接音频上行通道 %d...", PORT_A_IN);
+        ESP_LOGI("AUDIO_TX", "尝试连接音频上行端口 %d...", target_port);
         if (connect(tx_sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr)) != 0) {
             close(tx_sock);
             vTaskDelay(pdMS_TO_TICKS(2000));
             continue;
         }
-        ESP_LOGI("AUDIO_TX", "✅ 音频上行通道已建立！");
+        ESP_LOGI("AUDIO_TX", "✅ 音频上行通道已连接到端口 %d", target_port);
 
+        // 4. 循环发送：只要对应模式还在，就持续发送
         size_t item_size;
-        while (is_in_call) {
+        while ((current_is_video && is_video_recording) ||
+               (current_is_call && is_in_call)) {
             void *audio_data = xRingbufferReceive(intercom_ringbuf, &item_size, pdMS_TO_TICKS(100));
             if (audio_data != NULL) {
                 int sent = send(tx_sock, audio_data, item_size, 0);
@@ -786,8 +836,9 @@ static void network_audio_tx_task(void *pvParameters) {
             }
         }
 
+        // 5. 断开连接，回到顶部等待下一次触发
         close(tx_sock);
-        ESP_LOGI("AUDIO_TX", "音频上行通道已关闭");
+        ESP_LOGI("AUDIO_TX", "⏹️ 音频上行通道已关闭 (端口 %d)", target_port);
         vTaskDelay(pdMS_TO_TICKS(500));
     }
 }
@@ -901,14 +952,12 @@ void app_main(void) {
         ESP_LOGE(TAG, "💾 SD 卡模块异常，跳过后续依赖任务...");
     }
 
-    /* ---- 步骤4: 创建音频环形缓冲区 ---- */
-    // 每个缓冲区分配 10KB，足以缓冲数个音频帧 (512 samples * 2 bytes = 1024 bytes/帧)
-    // RINGBUF_TYPE_NOSPLIT: 保证每次写入的数据被完整读出
-    sd_ringbuf  = xRingbufferCreate(10240, RINGBUF_TYPE_NOSPLIT);  // SD卡录音
-    yin_ringbuf = xRingbufferCreate(8192,  RINGBUF_TYPE_NOSPLIT);  // YIN测音
-    sr_ringbuf  = xRingbufferCreate(16384, RINGBUF_TYPE_NOSPLIT);  // 语音唤醒 (稍大，避免丢帧)
-    ai_ringbuf  = xRingbufferCreate(16384, RINGBUF_TYPE_NOSPLIT);  // AI 对话 (Opus 编码)
-    intercom_ringbuf = xRingbufferCreate(16384, RINGBUF_TYPE_NOSPLIT);  // 网络对讲
+    /* ---- 步骤4: 创建音频环形缓冲区 (全部分配到 PSRAM，释放内部 SRAM) ---- */
+    sd_ringbuf       = create_ringbuf_psram(10240, RINGBUF_TYPE_NOSPLIT);  // SD卡录音
+    yin_ringbuf      = create_ringbuf_psram(8192,  RINGBUF_TYPE_NOSPLIT);  // YIN测音
+    sr_ringbuf       = create_ringbuf_psram(16384, RINGBUF_TYPE_NOSPLIT);  // 语音唤醒
+    ai_ringbuf       = create_ringbuf_psram(16384, RINGBUF_TYPE_NOSPLIT);  // AI 对话
+    intercom_ringbuf = create_ringbuf_psram(16384, RINGBUF_TYPE_NOSPLIT);  // 网络对讲
 
     if (sd_ringbuf == NULL) {
         ESP_LOGE(TAG, "❌ 致命错误：音频环形缓冲区创建失败！");
@@ -948,8 +997,18 @@ void app_main(void) {
     my_uart_init();
 
     /* ---- 步骤9: 创建 FreeRTOS 任务 ---- */
-    // 1. 麦克风核心采集任务 (音频 Hub)
-    xTaskCreatePinnedToCore(audio_hub_task, "audio_hub", 8192, NULL, 5, NULL, 1);
+    // 1. 麦克风核心采集任务 (音频 Hub) — 栈分配到 PSRAM
+    {
+        static StackType_t *hub_stack = NULL;
+        static StaticTask_t hub_tcb;
+        if (!hub_stack) hub_stack = heap_caps_malloc(8192, MALLOC_CAP_SPIRAM);
+        if (hub_stack) {
+            xTaskCreateStaticPinnedToCore(audio_hub_task, "audio_hub", 8192, NULL, 5, hub_stack, &hub_tcb, 1);
+            ESP_LOGI(TAG, "音频Hub栈已分配到 PSRAM (8KB)");
+        } else {
+            xTaskCreatePinnedToCore(audio_hub_task, "audio_hub", 8192, NULL, 5, NULL, 1);
+        }
+    }
 
     // 2. 小说读取任务 (栈分配到 PSRAM)
     {
@@ -982,6 +1041,19 @@ void app_main(void) {
 
     // 4. MQTT 噪声数据定时发布任务
     xTaskCreate(mqtt_noise_task, "mqtt_noise", 4096, NULL, 3, NULL);
+
+    // 5. 视频推流任务 (TCP 8890 端口) — 栈分配到 PSRAM
+    {
+        static StackType_t *video_stack = NULL;
+        static StaticTask_t video_tcb;
+        if (!video_stack) video_stack = heap_caps_malloc(8192, MALLOC_CAP_SPIRAM);
+        if (video_stack) {
+            xTaskCreateStaticPinnedToCore(video_stream_task, "video_task", 8192, NULL, 4, video_stack, &video_tcb, 1);
+            ESP_LOGI(TAG, "视频推流栈已分配到 PSRAM (8KB)");
+        } else {
+            xTaskCreatePinnedToCore(video_stream_task, "video_task", 8192, NULL, 4, NULL, 1);
+        }
+    }
 
     /* ---- 步骤10: TTS 播报启动欢迎语 ---- */
     tts_speak("贾维斯系统已启动");

@@ -365,6 +365,21 @@ static void uart_event_task(void *pvParameters)
                         }
                         // ==========================================================
 
+                        // ================= 视频推流指令解析 =================
+                        // CMD:VIDEO_START - 开始音视频推流
+                        else if (strstr(cmd_line, "CMD:VIDEO_START")) {
+                            extern volatile bool is_video_recording ;
+                            is_video_recording  = true;
+                            ESP_LOGI(TAG, "🎥 音视频推流已启动");
+                        }
+                        // CMD:VIDEO_STOP - 停止音视频推流
+                        else if (strstr(cmd_line, "CMD:VIDEO_STOP")) {
+                            extern volatile bool is_video_recording ;
+                            is_video_recording  = false;
+                            ESP_LOGI(TAG, "⏹️ 音视频推流已停止");
+                        }
+                        // ==========================================================
+
                         // 继续解析下一条命令
                         cmd_line = strtok(NULL, "\r\n");
                     }
