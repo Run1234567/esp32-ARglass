@@ -6,6 +6,8 @@
     <title>环境监测 - AR GLASS</title>
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         :root {
             --bg-color: #000000;
@@ -402,13 +404,14 @@
                 <div class="icon-wrapper">
                     <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
                 </div>
-                <div class="card-title">GPS 定位</div>
+                <div class="card-title">实时终端定位</div>
             </div>
-            <div class="gps-body">
-                <div>Lat: <span class="value-text" id="val-lat" style="font-size: 2rem;">--</span></div>
-                <div>Lng: <span class="value-text" id="val-lng" style="font-size: 2rem;">--</span></div>
+            <div id="map" style="width: 100%; height: 200px; border-radius: 12px; margin-top: 15px; z-index: 1;"></div>
+
+            <div class="gps-body" style="margin-top: 10px; flex-direction: row; justify-content: space-between;">
+                <div style="font-size: 0.8rem; color: var(--text-secondary);">Lat: <span id="val-lat">--</span></div>
+                <div style="font-size: 0.8rem; color: var(--text-secondary);">Lng: <span id="val-lng">--</span></div>
             </div>
-            <div class="status-text" id="status-gps">等待数据接入</div>
         </div>
 
         <div class="chart-card">
@@ -430,6 +433,13 @@
 
     <script>
         document.getElementById('backBtn').addEventListener('click', () => { window.history.back(); });
+
+        // ==================== 时间格式化工具 ====================
+        function formatTime(dateString) {
+            const date = dateString ? new Date(dateString) : new Date();
+            // 只取时分秒，例如 "14:30:05"
+            return date.toLocaleTimeString('zh-CN', { hour12: false });
+        }
 
         // ==================== 数据历史存储逻辑 ====================
         const MAX_DATA_POINTS = 20; // 限制图表显示的数据点数量
@@ -472,7 +482,12 @@
                 animation: { duration: 400, easing: 'easeOutQuart' },
                 plugins: { legend: { display: false }, tooltip: { enabled: false } },
                 scales: {
-                    x: { display: false },
+                    // 👇 开启 X 轴显示
+                    x: {
+                        display: true,
+                        grid: { display: false },
+                        ticks: { color: 'rgba(255, 255, 255, 0.4)', font: { size: 10, family: 'system-ui' }, maxTicksLimit: 6 }
+                    },
                     y: {
                         display: true, position: 'right', border: { display: false },
                         grid: { color: 'rgba(255, 255, 255, 0.05)', drawTicks: false },
@@ -484,19 +499,56 @@
 
         // ==================== Tab 切换逻辑 ====================
         document.querySelectorAll('.tab-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
+            btn.addEventListener('click', async (e) => {
+                const type = e.target.dataset.type;
+
+                // 切换 Tab 时，从后端拉取该类型的历史数据
+                await loadHistoryData(type);
+
                 document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
                 e.target.classList.add('active');
 
-                currentChartType = e.target.dataset.type;
+                currentChartType = type;
                 const ds = historyChart.data.datasets[0];
                 ds.data = historyData[currentChartType];
                 ds.borderColor = CHART_COLORS[currentChartType].border;
                 ds.backgroundColor = CHART_COLORS[currentChartType].bg;
-                
+
                 historyChart.update();
             });
         });
+
+        // ==================== 加载历史数据 ====================
+        async function loadHistoryData(type) {
+            try {
+                const response = await fetch(`/api/get_sensor_history?type=${type}`);
+                const res = await response.json();
+
+                if (res.status === 'success' && res.data && res.data.length > 0) {
+                    // 👇 提取数值
+                    historyData[type] = res.data.map(item => parseFloat(item.value));
+                    // 👇 提取并格式化时间作为 X 轴标签
+                    historyData.labels = res.data.map(item => formatTime(item.created_at));
+
+                    // 确保数据长度不超过限制
+                    if (historyData[type].length > MAX_DATA_POINTS) {
+                        historyData[type] = historyData[type].slice(-MAX_DATA_POINTS);
+                        historyData.labels = historyData.labels.slice(-MAX_DATA_POINTS);
+                    }
+
+                    // 如果当前正在查看这个类型，更新图表
+                    if (currentChartType === type) {
+                        historyChart.data.labels = historyData.labels; // 更新图表的 X 轴
+                        historyChart.data.datasets[0].data = historyData[type];
+                        historyChart.update();
+                    }
+
+                    console.log(`✅ 已加载 ${type} 历史数据: ${historyData[type].length} 条`);
+                }
+            } catch (err) {
+                console.error("加载历史数据失败:", err);
+            }
+        }
 
         // ==================== MQTT 配置 ====================
         const MQTT_BROKER = 'wss://www.runishandsome.asia/mqtt';
@@ -539,7 +591,7 @@
             const card = document.getElementById(`card-${type}`);
             const valEl = document.getElementById(`val-${type}`);
             const statusEl = document.getElementById(`status-${type}`);
-            
+
             if (valEl) valEl.textContent = value;
 
             if (type === 'light') {
@@ -553,38 +605,72 @@
 
             if (card) {
                 card.classList.remove('updating');
-                void card.offsetWidth; 
+                void card.offsetWidth;
                 card.classList.add('updating');
                 setTimeout(() => card.classList.remove('updating'), 300);
             }
 
             const arr = historyData[type];
             arr.push(parseFloat(value));
-            if (arr.length > MAX_DATA_POINTS) arr.shift(); 
+            if (arr.length > MAX_DATA_POINTS) arr.shift();
 
+            // 👇 核心改动：如果是当前正在看的图表，把当前最新时间推入 X 轴
             if (currentChartType === type) {
-                historyChart.update('none'); 
+                historyData.labels.push(formatTime());
+                if (historyData.labels.length > MAX_DATA_POINTS) {
+                    historyData.labels.shift();
+                }
+                historyChart.update('none'); // 无动画更新，看着更像心电图
             }
         }
 
         function updateLocation(type, value) {
-            const card = document.getElementById('card-gps');
             const valEl = document.getElementById(`val-${type}`);
-            const statusEl = document.getElementById('status-gps');
+            if (valEl) valEl.textContent = parseFloat(value).toFixed(6);
 
-            if (valEl) {
-                valEl.textContent = parseFloat(value).toFixed(4); // GPS 精度保留 4 位
+            // 更新全局坐标变量
+            if (type === 'lat') currentLat = parseFloat(value);
+            if (type === 'lng') currentLng = parseFloat(value);
+
+            // 如果经纬度都拿到了有效值，更新地图位置！
+            if (currentLat !== 0 && currentLng !== 0) {
+                const newLatLng = [currentLat, currentLng];
+                marker.setLatLng(newLatLng); // 移动那个绿色的点
+                map.setView(newLatLng);      // 让地图视野跟随点移动
             }
 
-            statusEl.textContent = '获取到位置更新';
-            
+            // 更新卡片动画
+            const card = document.getElementById('card-gps');
             if (card) {
                 card.classList.remove('updating');
-                void card.offsetWidth; 
+                void card.offsetWidth;
                 card.classList.add('updating');
                 setTimeout(() => card.classList.remove('updating'), 300);
             }
         }
+
+        // ==================== 终极版地图初始化 ====================
+        // 初始化地图，默认中心点设为北京，缩放级别设为 15
+        const map = L.map('map', { zoomControl: false }).setView([39.9042, 116.4074], 15);
+
+        // 核心：引入黑色的赛博朋克风地图底图
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap &copy; CARTO',
+            subdomains: 'abcd',
+            maxZoom: 20
+        }).addTo(map);
+
+        // 创建一个好看的标记点 (J.A.R.V.I.S 风格)
+        let marker = L.circleMarker([39.9042, 116.4074], {
+            color: '#32d74b',      // 边框发光绿
+            fillColor: '#32d74b',  // 填充绿
+            fillOpacity: 0.5,
+            radius: 8
+        }).addTo(map);
+
+        // 全局变量保存最新坐标
+        let currentLat = 0;
+        let currentLng = 0;
 
         // ==================== MQTT 连接核心 ====================
         function connectMQTT() {
@@ -635,7 +721,24 @@
             return client;
         }
 
-        const mqttClient = connectMQTT();
+        // ==================== 初始化 ====================
+        async function init() {
+            // 1. 先加载历史数据
+            await loadHistoryData('light');
+            await loadHistoryData('temp');
+            await loadHistoryData('noise');
+
+            // 2. 更新图表显示
+            const ds = historyChart.data.datasets[0];
+            ds.data = historyData[currentChartType];
+            historyChart.update();
+
+            // 3. 连接 MQTT 接收实时数据
+            const mqttClient = connectMQTT();
+        }
+
+        // 页面加载时执行初始化
+        init();
     </script>
 </body>
 </html>
