@@ -2,6 +2,7 @@
 #include "ui_globals.h" // 引入全局变量
 
 #include <time.h>
+#include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "lunar.h"
 
@@ -29,7 +30,11 @@ lv_obj_t * icon_batt;       // 电池图标标签
 void ui_ar_glass_init(void) {
     // ? 修改 1：不要再用 lv_scr_act() 了！
     // 创建一个全新的、干净的后台屏幕对象
-    ui_main_screen = lv_obj_create(NULL); 
+    ui_main_screen = lv_obj_create(NULL);
+    if (ui_main_screen == NULL) {
+        ESP_LOGE("AR_GLASS", "创建主屏幕失败！LVGL 可能未正确初始化");
+        return;
+    }
     
     // 给这个新屏幕设置黑底
     lv_obj_set_style_bg_color(ui_main_screen, lv_color_black(), 0); 

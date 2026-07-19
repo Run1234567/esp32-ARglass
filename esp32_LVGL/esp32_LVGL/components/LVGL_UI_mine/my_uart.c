@@ -1,5 +1,7 @@
 #include "my_uart.h"
 #include "ui_manager.h"
+#include "ui_translate_screen.h"
+#include "translate_control.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -205,6 +207,59 @@ static void uart_event_task(void *pvParameters) {
                     else if (strstr((char*)dtmp, "MU_END:1") != NULL) {
                         extern void music_apply_playlist(void);
                         music_apply_playlist();
+                    }
+                    // ---- 翻译模式 ----
+                    else if (strncmp((char*)dtmp, "CMD:TRANSLATE_START", 19) == 0) {
+                        char *payload = (char*)dtmp + 19;
+
+                        // 解析地址参数
+                        if (payload[0] == ':') {
+                            payload++;
+                            char *colon = strchr(payload, ':');
+                            int port = 5001;
+                            if (colon) {
+                                *colon = '\0';
+                                port = atoi(colon + 1);
+                            }
+                            translate_start(payload, port);
+                        } else {
+                            translate_start(NULL, 0);
+                        }
+
+                        // 切换到翻译界面
+                        if (lvgl_port_lock(0)) {
+                            switch_to_screen(SCREEN_TRANSLATE);
+                            ui_enter_translate_mode();
+                            lvgl_port_unlock();
+                        }
+                    }
+                    else if (strncmp((char*)dtmp, "CMD:TRANSLATE_STOP", 18) == 0) {
+                        translate_stop();
+                        if (lvgl_port_lock(0)) {
+                            ui_exit_translate_mode();
+                            lvgl_port_unlock();
+                        }
+                    }
+                    // ---- 翻译数据 ----
+                    else if (strncmp((char*)dtmp, "TRS:", 4) == 0) {
+                        // 原文: TRS:Hello world
+                        char *src_text = (char*)dtmp + 4;
+                        src_text[strcspn(src_text, "\r\n")] = '\0';
+                        extern void ui_update_translate_src(const char *text);
+                        if (lvgl_port_lock(0)) {
+                            ui_update_translate_src(src_text);
+                            lvgl_port_unlock();
+                        }
+                    }
+                    else if (strncmp((char*)dtmp, "TRT:", 4) == 0) {
+                        // 译文: TRT:你好世界
+                        char *dst_text = (char*)dtmp + 4;
+                        dst_text[strcspn(dst_text, "\r\n")] = '\0';
+                        extern void ui_update_translate_dst(const char *text);
+                        if (lvgl_port_lock(0)) {
+                            ui_update_translate_dst(dst_text);
+                            lvgl_port_unlock();
+                        }
                     }
                     else if (strstr((char*)dtmp, "LRC_CLR") != NULL) {
                         extern void music_clear_lrc(void);

@@ -4,8 +4,6 @@
 #include "ui_manager.h"
 #include "esp_log.h"
 
-static const char *TAG = "CAM";
-
 lv_obj_t * ui_camera_screen;
 static lv_obj_t * label_cam_status;
 

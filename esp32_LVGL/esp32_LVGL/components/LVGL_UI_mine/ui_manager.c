@@ -48,6 +48,9 @@
 #include "ui_call_screen.h"    // 网络通话
 #include "ui_audio_switch_screen.h" // 音频切换
 #include "ui_video_screen.h"       // AR 录像机
+#include "ui_translate_screen.h"   // 翻译模式
+#include "ui_translate_lang_screen.h" // 翻译语言选择
+#include "ui_translate_mode_screen.h" // 翻译模式选择
 #include "max30102.h"          // MAX30102 心率传感器
 #include "my_uart.h"           // UART 串口通信模块
 
@@ -64,6 +67,10 @@ extern void game_flappy_pause_timer(void);        // 像素鸟定时器安全暂
 extern void ui_game_note_init(void);              // 声控八分音符初始化
 extern void game_note_screen_handle_cmd(ui_cmd_t cmd); // 声控八分音符手势处理
 extern void game_tetris_pause_timer(void);        // 俄罗斯方块定时器暂停
+
+// ---- 翻译模块的外部函数声明 ----
+extern void ui_enter_translate_mode(void);
+extern void ui_exit_translate_mode(void);
 
 static const char *TAG = "UI_MANAGER"; // ESP_LOG 日志标签
 
@@ -111,6 +118,9 @@ void switch_to_screen(ui_screen_state_t target_screen) {
         case SCREEN_LIGHT:       target_obj = ui_light_screen;     break;
         case SCREEN_HEALTH:      target_obj = ui_health_screen;    break;
         case SCREEN_VIDEO:       target_obj = ui_video_screen;     break;
+        case SCREEN_TRANSLATE_MODE: target_obj = ui_translate_mode_screen; break;
+        case SCREEN_TRANSLATE_LANG: target_obj = ui_translate_lang_screen; break;
+        case SCREEN_TRANSLATE:   target_obj = ui_translate_screen; break;
         default: return; 
     }
 
@@ -153,7 +163,11 @@ void switch_to_screen(ui_screen_state_t target_screen) {
         is_calling_now = false;
     }
     if (current_screen == SCREEN_HEALTH && target_screen != SCREEN_HEALTH) {
-        max30102_stop_task(); 
+        max30102_stop_task();
+    }
+    // 如果当前是翻译模式，且准备跳出，则停止翻译
+    if (current_screen == SCREEN_TRANSLATE && target_screen != SCREEN_TRANSLATE) {
+        ui_exit_translate_mode();
     }
 
     // ---- 第四步：执行 LVGL 屏幕切换 ----
@@ -175,6 +189,10 @@ void switch_to_screen(ui_screen_state_t target_screen) {
     }
     if (current_screen == SCREEN_PITCH) {
         my_uart_send("CMD:PITCH_ON\r\n");
+    }
+    // 如果目标屏幕是翻译模式，则启动翻译
+    if (current_screen == SCREEN_TRANSLATE) {
+        ui_enter_translate_mode();
     }
 
     ESP_LOGI(TAG, "Screen switched to: %d", current_screen);
@@ -204,6 +222,9 @@ static void process_ui_command(ui_cmd_t cmd) {
         case UI_CMD_GOTO_CALL:      switch_to_screen(SCREEN_CALL); return;
         case UI_CMD_GOTO_AUDIO:     switch_to_screen(SCREEN_AUDIO_SWITCH); return;
         case UI_CMD_GOTO_GAME_LIST: switch_to_screen(SCREEN_GAME_LIST); return;
+        case UI_CMD_GOTO_TRANSLATE: switch_to_screen(SCREEN_TRANSLATE); return;
+        case UI_CMD_GOTO_TRANSLATE_LANG: switch_to_screen(SCREEN_TRANSLATE_LANG); return;
+        case UI_CMD_GOTO_TRANSLATE_MODE: switch_to_screen(SCREEN_TRANSLATE_MODE); return;
         default: break;
     }
 
@@ -254,6 +275,7 @@ static void process_ui_command(ui_cmd_t cmd) {
                 if (selected_idx == 15) switch_to_screen(SCREEN_CALL);
                 if (selected_idx == 16) switch_to_screen(SCREEN_AUDIO_SWITCH);
                 if (selected_idx == 17) switch_to_screen(SCREEN_VIDEO);
+                if (selected_idx == 18) switch_to_screen(SCREEN_TRANSLATE_MODE);
             }
             break;
 
@@ -368,6 +390,18 @@ static void process_ui_command(ui_cmd_t cmd) {
             video_screen_handle_cmd(cmd);
             break;
 
+        case SCREEN_TRANSLATE:
+            translate_screen_handle_cmd(cmd);
+            break;
+
+        case SCREEN_TRANSLATE_LANG:
+            translate_lang_screen_handle_cmd(cmd);
+            break;
+
+        case SCREEN_TRANSLATE_MODE:
+            translate_mode_screen_handle_cmd(cmd);
+            break;
+
         default:
             break;
     }
@@ -393,38 +427,81 @@ static void ui_manager_task(void *pvParameter) {
 //   UI 管理器初始化 —— 系统启动时调用一次
 // ============================================================
 void ui_manager_init(void) {
+    ESP_LOGI(TAG, "尝试获取 LVGL 锁...");
     if (lvgl_port_lock(0)) {
-        ui_ar_glass_init();          
-        ui_menu_screen_init();       
-        ui_novel_screen_init();      
-        ui_clock_screen_init();      
-        ui_record_screen_init();     
-        ui_playlist_screen_init();   
-        ui_camera_screen_init();     
-        ui_noise_screen_init();      
-        ui_pitch_screen_init();      
-        ui_music_screen_init();      
-        ui_game_list_screen_init();  
-        ui_game_screen_init();       
-        ui_game_2048_init();         
-        ui_game_flappy_init();       
-        ui_game_note_init();         
-        ui_game_tetris_init();
-        ui_game_mole_init();
-        ui_game_snake_init();
-        ui_game_rhythm_init();
-        ui_game_simon_init();
-        ui_wifi_scan_screen_init();
-        ui_gps_screen_init();
-        ui_ai_screen_init();
-        ui_call_screen_init();
-        ui_audio_switch_screen_init();
-        ui_light_screen_init();      
-        ui_health_screen_init();
-        ui_video_screen_init();
+        ESP_LOGI(TAG, "LVGL 锁获取成功，开始初始化 UI...");
 
+        ESP_LOGI(TAG, "初始化 AR 主界面...");
+        ui_ar_glass_init();
+        ESP_LOGI(TAG, "AR 主界面初始化完成, ui_main_screen=%p", (void*)ui_main_screen);
+
+        ESP_LOGI(TAG, "初始化菜单...");
+        ui_menu_screen_init();
+        ESP_LOGI(TAG, "初始化小说...");
+        ui_novel_screen_init();
+        ESP_LOGI(TAG, "初始化时钟...");
+        ui_clock_screen_init();
+        ESP_LOGI(TAG, "初始化录音...");
+        ui_record_screen_init();
+        ESP_LOGI(TAG, "初始化播放列表...");
+        ui_playlist_screen_init();
+        ESP_LOGI(TAG, "初始化相机...");
+        ui_camera_screen_init();
+        ESP_LOGI(TAG, "初始化噪声...");
+        ui_noise_screen_init();
+        ESP_LOGI(TAG, "初始化音高...");
+        ui_pitch_screen_init();
+        ESP_LOGI(TAG, "初始化音乐...");
+        ui_music_screen_init();
+        ESP_LOGI(TAG, "初始化游戏列表...");
+        ui_game_list_screen_init();
+        ESP_LOGI(TAG, "初始化赛博跑酷...");
+        ui_game_screen_init();
+        ESP_LOGI(TAG, "初始化 2048...");
+        ui_game_2048_init();
+        ESP_LOGI(TAG, "初始化像素鸟...");
+        ui_game_flappy_init();
+        ESP_LOGI(TAG, "初始化声控八分音符...");
+        ui_game_note_init();
+        ESP_LOGI(TAG, "初始化俄罗斯方块...");
+        ui_game_tetris_init();
+        ESP_LOGI(TAG, "初始化打地鼠...");
+        ui_game_mole_init();
+        ESP_LOGI(TAG, "初始化贪吃蛇...");
+        ui_game_snake_init();
+        ESP_LOGI(TAG, "初始化节奏魔杖...");
+        ui_game_rhythm_init();
+        ESP_LOGI(TAG, "初始化记忆大师...");
+        ui_game_simon_init();
+        ESP_LOGI(TAG, "初始化 WiFi 扫描...");
+        ui_wifi_scan_screen_init();
+        ESP_LOGI(TAG, "初始化 GPS...");
+        ui_gps_screen_init();
+        ESP_LOGI(TAG, "初始化 AI...");
+        ui_ai_screen_init();
+        ESP_LOGI(TAG, "初始化通话...");
+        ui_call_screen_init();
+        ESP_LOGI(TAG, "初始化音频切换...");
+        ui_audio_switch_screen_init();
+        ESP_LOGI(TAG, "初始化光照...");
+        ui_light_screen_init();
+        ESP_LOGI(TAG, "初始化健康...");
+        ui_health_screen_init();
+        ESP_LOGI(TAG, "初始化录像...");
+        ui_video_screen_init();
+        ESP_LOGI(TAG, "初始化翻译...");
+        ui_translate_screen_init();
+        ESP_LOGI(TAG, "初始化翻译语言选择...");
+        ui_translate_lang_screen_init();
+        ESP_LOGI(TAG, "初始化翻译模式选择...");
+        ui_translate_mode_screen_init();
+
+        ESP_LOGI(TAG, "加载主屏幕...");
         lv_scr_load(ui_main_screen);
         lvgl_port_unlock();
+        ESP_LOGI(TAG, "UI 初始化全部完成！");
+    } else {
+        ESP_LOGE(TAG, "获取 LVGL 锁失败！UI 未初始化");
     }
 
     ui_cmd_queue = xQueueCreate(10, sizeof(ui_cmd_t));

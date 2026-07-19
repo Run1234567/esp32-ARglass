@@ -4,10 +4,17 @@
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 
-// ±©Â¶¾ä±ú¸ø LVGL Ê¹ÓÃ
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 extern esp_lcd_panel_io_handle_t io_handle;
 extern esp_lcd_panel_handle_t panel_handle;
 
 void lcd_init(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

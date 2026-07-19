@@ -52,7 +52,10 @@ typedef enum {
     SCREEN_CALL,         // 24. 网络通话
     SCREEN_AUDIO_SWITCH, // 25. 音频输出切换
     SCREEN_LIGHT,        // 26. 光照传感器界面
-    SCREEN_HEALTH        // 19. 心率血氧监测
+    SCREEN_HEALTH,          // 27. 心率血氧监测
+    SCREEN_TRANSLATE_MODE,  // 28. 翻译模式选择
+    SCREEN_TRANSLATE_LANG,  // 29. 翻译语言选择
+    SCREEN_TRANSLATE        // 30. 翻译模式
 } ui_screen_state_t;
 
 // ============================================================

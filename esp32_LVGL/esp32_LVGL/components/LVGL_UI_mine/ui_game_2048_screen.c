@@ -6,8 +6,9 @@
 #include "ui_globals.h"      // 全局变量和通用定义
 #include "ui_manager.h"      // UI管理器，提供屏幕切换和命令类型定义
 #include "esp_lvgl_port.h"   // ESP-IDF的LVGL端口适配层
-#include <stdio.h> 
-#include <stdlib.h> 
+#include "esp_log.h"
+#include <stdio.h>
+#include <stdlib.h>
 
 // ==========================================
 //   2048 游戏全局对象与核心矩阵
@@ -225,6 +226,10 @@ static bool slide_and_merge(ui_cmd_t direction) {
 // ==========================================
 void ui_game_2048_init(void) {
     ui_game_2048_screen = lv_obj_create(NULL);
+    if (ui_game_2048_screen == NULL) {
+        ESP_LOGE("GAME_2048", "LVGL 内存不足！无法创建 2048 界面！");
+        return;
+    }
     lv_obj_set_style_bg_color(ui_game_2048_screen, lv_color_white(), 0);
 
     // ===== 1. 顶部得分板 =====

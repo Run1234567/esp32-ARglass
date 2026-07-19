@@ -219,18 +219,14 @@ static void gps_read_task(void *arg) {
                     sentence[sentence_len] = '\0';
                     parse_nmea(sentence);
                     sentence_count++;
-                    // 每 20 条打印一次原始 NMEA 内容
-                    if (sentence_count % 20 == 0) {
-                        ESP_LOGI(TAG, "NMEA #%d: %s", sentence_count, sentence);
-                    }
                     sentence_len = 0;
                 }
             }
         }
 
-        // 每 5 秒打印一次详细状态
+        // 每 5 秒打印一次详细状态（500 * 10ms = 5000ms）
         print_counter++;
-        if (print_counter >= 50) {
+        if (print_counter >= 500) {
             print_counter = 0;
             if (s_gps_data.valid) {
                 ESP_LOGI(TAG, "=== GPS 已定位 ===");
@@ -244,7 +240,6 @@ static void gps_read_task(void *arg) {
             } else {
                 ESP_LOGW(TAG, "=== 搜星中 ===");
                 ESP_LOGW(TAG, "  已捕获卫星: %d 颗", s_gps_data.satellites);
-                ESP_LOGW(TAG, "  本次读取: %d 字节", len);
                 ESP_LOGW(TAG, "  提示: 室外空旷处等待 1~3 分钟");
             }
         }

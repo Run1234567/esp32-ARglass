@@ -36,9 +36,11 @@ static void progress_timer_cb(lv_timer_t * timer) {
             current_sec++;
             update_time_label();
         }
-        // ✨ 播放时：光环持续旋转，营造数据读取的科技感
-        arc_rotation = (arc_rotation + 15) % 360;
-        lv_arc_set_rotation(deco_arc, arc_rotation);
+        // 光环旋转（如果 arc 存在）
+        if (deco_arc != NULL) {
+            arc_rotation = (arc_rotation + 15) % 360;
+            lv_arc_set_rotation(deco_arc, arc_rotation);
+        }
     }
 }
 
@@ -53,7 +55,7 @@ void playlist_set_total_time(int t_sec) {
         lv_obj_clear_flag(playlist_time_label, LV_OBJ_FLAG_HIDDEN);
 
         // UI 状态切为：播放中 (青色主题)
-        lv_obj_set_style_arc_color(deco_arc, lv_color_hex(0x00FFFF), LV_PART_INDICATOR); 
+        if (deco_arc != NULL) lv_obj_set_style_arc_color(deco_arc, lv_color_hex(0x00FFFF), LV_PART_INDICATOR);
         lv_obj_set_style_bg_color(bar_progress, lv_color_hex(0x00FFFF), LV_PART_INDICATOR);
         
         update_time_label();
@@ -112,8 +114,8 @@ void playlist_screen_handle_cmd(ui_cmd_t cmd) {
             
             // 隐藏进度条，光环变灰归位
             lv_obj_add_flag(bar_progress, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_add_flag(playlist_time_label, LV_OBJ_FLAG_HIDDEN); // 修复了原代码 label_time 未定义的Bug
-            lv_obj_set_style_arc_color(deco_arc, lv_color_hex(0x444444), LV_PART_INDICATOR);
+            lv_obj_add_flag(playlist_time_label, LV_OBJ_FLAG_HIDDEN);
+            if (deco_arc != NULL) lv_obj_set_style_arc_color(deco_arc, lv_color_hex(0x444444), LV_PART_INDICATOR);
             
             lv_label_set_text(label_status, "#00FF00 已停止 | 左滑退出#");
         } else {
@@ -165,18 +167,18 @@ void playlist_screen_handle_cmd(ui_cmd_t cmd) {
                 lv_timer_pause(progress_timer);
                 
                 // UI 状态切为：暂停 (橙色主题)
-                lv_obj_set_style_arc_color(deco_arc, lv_color_hex(0xFF8800), LV_PART_INDICATOR);
+                if (deco_arc != NULL) lv_obj_set_style_arc_color(deco_arc, lv_color_hex(0xFF8800), LV_PART_INDICATOR);
                 lv_obj_set_style_bg_color(bar_progress, lv_color_hex(0xFF8800), LV_PART_INDICATOR);
                 lv_label_set_text(label_status, "#FF8800 ⏸ 已暂停 | 右滑继续#");
-                
+
             } else if (play_state == 2) {
                 // 触发恢复
                 my_uart_send("CMD:RESUME_MUSIC\r\n");
                 play_state = 1;
                 lv_timer_resume(progress_timer);
-                
+
                 // UI 状态恢复为：播放 (青色主题)
-                lv_obj_set_style_arc_color(deco_arc, lv_color_hex(0x00FFFF), LV_PART_INDICATOR);
+                if (deco_arc != NULL) lv_obj_set_style_arc_color(deco_arc, lv_color_hex(0x00FFFF), LV_PART_INDICATOR);
                 lv_obj_set_style_bg_color(bar_progress, lv_color_hex(0x00FFFF), LV_PART_INDICATOR);
                 lv_label_set_text(label_status, "#00FFFF ▶ 正在播放 | 右滑暂停#");
             }
@@ -196,38 +198,28 @@ void ui_playlist_screen_init(void) {
     lv_obj_t * title = lv_label_create(ui_playlist_screen);
     lv_obj_set_style_text_font(title, &my_font_cn_16, 0);
     lv_obj_set_style_text_color(title, lv_color_white(), 0);
-    lv_label_set_text(title, "📁 音频数据库");
+    lv_label_set_text(title, "音频数据库");
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
 
-    // ✨ 1. 新增背景修饰：科技感光环
-    deco_arc = lv_arc_create(ui_playlist_screen);
-    lv_obj_set_size(deco_arc, 220, 220); // 大尺寸包围滚轮
-    lv_obj_align(deco_arc, LV_ALIGN_CENTER, 0, -10);
-    lv_arc_set_bg_angles(deco_arc, 0, 360);
-    lv_arc_set_angles(deco_arc, 0, 90);  // 仅显示90度的激活弧段
-    lv_obj_remove_style(deco_arc, NULL, LV_PART_KNOB);
-    lv_obj_clear_flag(deco_arc, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_arc_color(deco_arc, lv_color_hex(0x222222), LV_PART_MAIN);      // 轨道深灰
-    lv_obj_set_style_arc_width(deco_arc, 2, LV_PART_MAIN);                           // 轨道极细
-    lv_obj_set_style_arc_color(deco_arc, lv_color_hex(0x444444), LV_PART_INDICATOR); // 默认待机灰
-    lv_obj_set_style_arc_width(deco_arc, 4, LV_PART_INDICATOR);
+    // 简化版：去掉装饰 arc，避免渲染卡顿
+    deco_arc = NULL;
 
-    // ✨ 2. 全息透明滚轮设计
+    // 透明滚轮设计
     roller_playlist = lv_roller_create(ui_playlist_screen);
-    lv_obj_set_width(roller_playlist, 180);
-    lv_roller_set_visible_row_count(roller_playlist, 3);
+    lv_obj_set_width(roller_playlist, 200);
+    lv_roller_set_visible_row_count(roller_playlist, 5);
     lv_roller_set_options(roller_playlist, "获取中...", LV_ROLLER_MODE_NORMAL);
-    lv_obj_set_style_bg_opa(roller_playlist, LV_OPA_TRANSP, 0); // 背景全透明
-    lv_obj_set_style_border_width(roller_playlist, 0, 0);       // 去除边框
-    lv_obj_set_style_text_color(roller_playlist, lv_color_hex(0x888888), 0); // 未选中项为暗灰色
-    lv_obj_set_style_text_color(roller_playlist, lv_color_hex(0x00FFFF), LV_PART_SELECTED); // 选中项发青光
-    lv_obj_set_style_bg_opa(roller_playlist, LV_OPA_TRANSP, LV_PART_SELECTED); // 选中框背景透明
-    lv_obj_align(roller_playlist, LV_ALIGN_CENTER, 0, -10);
+    lv_obj_set_style_bg_opa(roller_playlist, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(roller_playlist, 0, 0);
+    lv_obj_set_style_text_color(roller_playlist, lv_color_hex(0x888888), 0);
+    lv_obj_set_style_text_color(roller_playlist, lv_color_hex(0x00FFFF), LV_PART_SELECTED);
+    lv_obj_set_style_bg_opa(roller_playlist, LV_OPA_TRANSP, LV_PART_SELECTED);
+    lv_obj_align(roller_playlist, LV_ALIGN_CENTER, 0, -15);
 
-    // 3. 霓虹线形进度条
+    // 进度条
     bar_progress = lv_bar_create(ui_playlist_screen);
-    lv_obj_set_size(bar_progress, 180, 4); // 调得更细长，提升精致感
-    lv_obj_align(bar_progress, LV_ALIGN_BOTTOM_MID, 0, -45);
+    lv_obj_set_size(bar_progress, 200, 4);
+    lv_obj_align(bar_progress, LV_ALIGN_BOTTOM_MID, 0, -40);
     lv_obj_set_style_bg_color(bar_progress, lv_color_hex(0x333333), LV_PART_MAIN);
     lv_obj_set_style_bg_color(bar_progress, lv_color_hex(0x00FFFF), LV_PART_INDICATOR);
     lv_obj_add_flag(bar_progress, LV_OBJ_FLAG_HIDDEN);

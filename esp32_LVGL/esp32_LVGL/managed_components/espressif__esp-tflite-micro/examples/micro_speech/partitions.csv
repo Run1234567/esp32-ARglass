@@ -1,0 +1,8 @@
+# Name,   Type, SubType, Offset,   Size,      Flags
+# Partition table at 0xc000 (CONFIG_PARTITION_TABLE_OFFSET) — first partition must start at >= 0xd000.
+# OTA-capable layout sized for 4MB flash. 1920KB per app slot leaves room for tflite models.
+nvs,      data, nvs,     0xd000,   0x6000,
+otadata,  data, ota,     ,         0x2000,
+phy_init, data, phy,     ,         0x1000,
+ota_0,    app,  ota_0,   0x20000,  0x1E0000,
+ota_1,    app,  ota_1,   ,         0x1E0000,

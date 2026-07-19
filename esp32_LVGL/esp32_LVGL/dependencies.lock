@@ -1,4 +1,38 @@
 dependencies:
+  espressif/cjson:
+    component_hash: e788323270d90738662d66fffa910bfe1fba019bba087f01557e70c40485b469
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.7.19~2
+  espressif/esp-nn:
+    component_hash: e98a7dd3dfde460b1b4ca982e2ebae0b4831719a8e4659d19c145943deaf682b
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.2'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    version: 1.2.3
+  espressif/esp-tflite-micro:
+    component_hash: 22fc501ab0b1bd39377048d608e6fce0e7b55cd07d244cbf41044b24d9b7db2e
+    dependencies:
+    - name: espressif/esp-nn
+      registry_url: https://components.espressif.com
+      require: private
+      version: '>=1.1.1'
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.3.7
   espressif/esp_lvgl_port:
     component_hash: b6360960f47b6776462e7092861b3ea66477ffb762a01baa0aecbb3d74cd50f4
     dependencies:
@@ -23,10 +57,20 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.1.0
+  espressif/mqtt:
+    component_hash: ffdad5659706b4dc14bc63f8eb73ef765efa015bf7e9adf71c813d52a2dc9342
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.3'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.0.0
   idf:
     source:
       type: idf
-    version: 5.5.0
+    version: 6.0.1
   lvgl/lvgl:
     component_hash: 948bff879a345149b83065535bbc4a026ce9f47498a22881e432a264b9098015
     dependencies: []
@@ -35,9 +79,12 @@ dependencies:
       type: service
     version: 8.3.11
 direct_dependencies:
+- espressif/cjson
+- espressif/esp-tflite-micro
 - espressif/esp_lvgl_port
 - espressif/esp_websocket_client
+- espressif/mqtt
 - lvgl/lvgl
-manifest_hash: 34f4dec858b27635b30e79079bcd574be58ebffb7f2a57a63dbb72b76b0cf33f
+manifest_hash: afb3f08ce42f59fbda04a13c6289fd2558d63f19ad78bf596e7a8753e0304486
 target: esp32s3
 version: 2.0.0

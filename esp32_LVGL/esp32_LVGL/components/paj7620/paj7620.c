@@ -14,8 +14,8 @@
 static const char *TAG = "PAJ7620";
 
 // ---- 硬件配置 ----
-#define PAJ7620_SCL         38
-#define PAJ7620_SDA         39
+#define PAJ7620_SCL         1
+#define PAJ7620_SDA         2
 #define PAJ7620_I2C_PORT    I2C_NUM_1
 #define PAJ7620_I2C_FREQ    10000
 static uint8_t paj7620_addr = 0x73; // 运行时自动探测

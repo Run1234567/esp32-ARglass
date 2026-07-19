@@ -38,7 +38,7 @@ void ui_light_screen_init(void) {
     lv_obj_t * title = lv_label_create(ui_light_screen);
     lv_obj_set_style_text_color(title, lv_color_hex(0x00FFFF), 0);
     lv_obj_set_style_text_font(title, &my_font_cn_16, 0);
-    lv_label_set_text(title, "环境光照�? (LUX)");
+    lv_label_set_text(title, "环境光照 (LUX)");
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 20);
 
     // 2. 科技感环形仪表盘

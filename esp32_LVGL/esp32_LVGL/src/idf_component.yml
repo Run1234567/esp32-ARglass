@@ -2,3 +2,4 @@ dependencies:
   lvgl/lvgl: "8.3.*"
   espressif/esp_lvgl_port: "^2.0.0"
   espressif/esp_websocket_client: "1.1.0"
+  espressif/esp-tflite-micro: "^1.0.0"

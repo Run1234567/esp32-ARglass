@@ -24,8 +24,11 @@ static const char *TAG = "MAX30102";
 #define REG_LED1_PA         0x0C
 #define REG_LED2_PA         0x0D
 
-// ---- 与其他 I2C 设备共享总线 ----
-#define I2C_PORT            I2C_NUM_0
+// ---- 使用独立 I2C 总线（GPIO 38/39） ----
+#define I2C_PORT            I2C_NUM_1
+#define MAX30102_SCL        38
+#define MAX30102_SDA        39
+#define MAX30102_I2C_FREQ   400000
 
 // ---- 任务配置 ----
 #define HR_TASK_STACK       4096
@@ -62,11 +65,18 @@ static void heart_rate_task(void *pvParameters) {
     int64_t last_beat_time = 0;
     float bpm_history[10] = {0};
     int bpm_idx = 0;
+    static int print_count = 0;
 
     while (1) {
         if (max30102_read_fifo(data_buf, 6) == ESP_OK) {
             uint32_t red_raw = ((data_buf[0] << 16) | (data_buf[1] << 8) | data_buf[2]) & 0x03FFFF;
             uint32_t ir_raw  = ((data_buf[3] << 16) | (data_buf[4] << 8) | data_buf[5]) & 0x03FFFF;
+
+            // 每 500 次（约5秒）打印一次原始数据
+            if (++print_count >= 500) {
+                ESP_LOGI(TAG, "原始数据 | RED: %lu | IR: %lu", red_raw, ir_raw);
+                print_count = 0;
+            }
 
             if (ir_raw > 30000) {
                 dc_ir = 0.95f * dc_ir + 0.05f * (float)ir_raw;
@@ -92,7 +102,7 @@ static void heart_rate_task(void *pvParameters) {
                         if (spo2 > 100) spo2 = 99.0f;
                         if (spo2 < 85) spo2 = 90.0f;
                         s_spo2 = spo2;
-                        ESP_LOGI(TAG, "BPM:%.1f SpO2:%.1f%%", s_bpm, s_spo2);
+                        ESP_LOGI(TAG, "心率: %.1f BPM | 血氧: %.1f%%", s_bpm, s_spo2);
                     }
                     last_beat_time = current_time;
                 }
@@ -117,6 +127,27 @@ static void heart_rate_task(void *pvParameters) {
 // ============================================================
 esp_err_t max30102_init(void) {
     if (is_initialized) return ESP_OK;
+
+    // 0. 初始化独立 I2C 总线（GPIO 38/39）
+    i2c_config_t conf = {
+        .mode = I2C_MODE_MASTER,
+        .sda_io_num = (gpio_num_t)MAX30102_SDA,
+        .scl_io_num = (gpio_num_t)MAX30102_SCL,
+        .sda_pullup_en = GPIO_PULLUP_ENABLE,
+        .scl_pullup_en = GPIO_PULLUP_ENABLE,
+        .master.clk_speed = MAX30102_I2C_FREQ,
+    };
+    esp_err_t err = i2c_param_config(I2C_PORT, &conf);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "I2C 配置失败: %s", esp_err_to_name(err));
+        return err;
+    }
+    err = i2c_driver_install(I2C_PORT, conf.mode, 0, 0, 0);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "I2C 驱动安装失败: %s", esp_err_to_name(err));
+        return err;
+    }
+    ESP_LOGI(TAG, "MAX30102 I2C 初始化完成 (SCL:%d SDA:%d)", MAX30102_SCL, MAX30102_SDA);
 
     // 1. 硬件复位
     max30102_write_reg(REG_MODE_CONFIG, 0x40);

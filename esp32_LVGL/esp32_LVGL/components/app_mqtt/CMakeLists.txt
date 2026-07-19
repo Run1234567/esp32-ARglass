@@ -1,4 +1,4 @@
-# ÕâÀïµÄ REQUIRES mqtt ¾ÍÊÇÔÚ¸æËßÏµÍ³£ºÎÒÃÇÐèÒª¹Ù·½µÄ mqtt µ×²ã¿âÖ§³Ö
+# ï¿½ï¿½ï¿½ï¿½ï¿½ REQUIRES mqtt ï¿½ï¿½ï¿½ï¿½ï¿½Ú¸ï¿½ï¿½ï¿½ÏµÍ³ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Òªï¿½Ù·ï¿½ï¿½ï¿½ mqtt ï¿½×²ï¿½ï¿½Ö§ï¿½ï¿½
 idf_component_register(SRCS "app_mqtt.c"
                        INCLUDE_DIRS "."
-                       REQUIRES mqtt esp_netif json lvgl esp_lvgl_port LVGL_UI_mine)
+                       REQUIRES mqtt esp_netif cjson lvgl esp_lvgl_port LVGL_UI_mine)

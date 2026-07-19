@@ -56,7 +56,10 @@ typedef enum {
     UI_CMD_GOTO_AI,
     UI_CMD_GOTO_CALL,
     UI_CMD_GOTO_AUDIO,
-    UI_CMD_GOTO_GAME_LIST
+    UI_CMD_GOTO_GAME_LIST,
+    UI_CMD_GOTO_TRANSLATE,
+    UI_CMD_GOTO_TRANSLATE_LANG,
+    UI_CMD_GOTO_TRANSLATE_MODE
 } ui_cmd_t;
 
 // ============================================================
@@ -96,6 +99,8 @@ extern lv_obj_t * ui_gps_screen;         // GPS 定位界面
 extern lv_obj_t * ui_ai_screen;          // AI 字幕界面
 extern lv_obj_t * ui_call_screen;        // 网络通话界面
 extern lv_obj_t * ui_audio_switch_screen; // 音频切换界面
+extern lv_obj_t * ui_translate_screen;    // 翻译模式界面
+extern lv_obj_t * ui_translate_lang_screen; // 翻译语言选择界面
 
 // ============================================================
 //   MQTT 数据 / 时钟模块共享变量

@@ -189,11 +189,15 @@ void read_mpu6050_task(void *pvParameters) {
             // 🚀 将读到的数据直接扔进解算器
             process_imu_data(accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z);
 
-            // static int print_count = 0;
-            // if (++print_count >= 20) { 
-            //     ESP_LOGI(TAG, "Roll: %.1f | Pitch: %.1f | Yaw: %.1f", attitude.roll, attitude.pitch, attitude.yaw);
-            //     print_count = 0;
-            // }
+            // 串口输出陀螺仪数据（每500次打印一次，约5秒 @200Hz）
+            static int print_count = 0;
+            if (++print_count >= 500) {
+                ESP_LOGI(TAG, "MPU6050 | Accel: X=%d Y=%d Z=%d | Gyro: X=%d Y=%d Z=%d",
+                         accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z);
+                ESP_LOGI(TAG, "MPU6050 | Roll: %.1f | Pitch: %.1f | Yaw: %.1f",
+                         attitude.roll, attitude.pitch, attitude.yaw);
+                print_count = 0;
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(10)); // 解算频率提升至 200Hz (5ms)，对 Mahony 算法非常重要！
     }
