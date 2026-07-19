@@ -7,6 +7,6 @@
 
 idf_component_register(
     SRCS "audio_app.c"
-    INCLUDE_DIRS "."         # 头文件在当前目录
-    REQUIRES log driver      # 依赖日志和底层硬件驱动(driver)
+    INCLUDE_DIRS "."
+    REQUIRES log esp_driver_i2s
 )

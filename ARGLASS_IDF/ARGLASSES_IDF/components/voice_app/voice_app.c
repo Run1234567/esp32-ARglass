@@ -179,14 +179,7 @@ static void detect_task(void *arg) {
             ESP_LOGI(TAG, "=================================");
             ESP_LOGI(TAG, "🚀 [成功] 识别到唤醒词：贾维斯！");
             ESP_LOGI(TAG, "=================================");
-            tts_speak("贾维斯已就绪，请说出指令。");  // 播报提示语
-
-            /* 启动 AI 对话：OTA 发现 → WebSocket 连接 → 音频流传输 */
-            if (!ai_chat_is_active()) {
-                ai_chat_start();
-            } else {
-                ESP_LOGW(TAG, "AI 对话已在进行中，跳过重复启动");
-            }
+            tts_speak("贾维斯已就绪，请说出指令。");
         }
     }
 }

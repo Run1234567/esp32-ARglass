@@ -1,37 +1,37 @@
-# =====================================================================
 # ESP-IDF SDK 默认配置覆盖
-# =====================================================================
-# 此文件覆盖 ESP-IDF 的默认 sdkconfig 值。
-# PlatformIO 编译时会自动合并此文件的配置。
-# =====================================================================
+# 此文件覆盖 ESP-IDF 的默认 sdkconfig 值
+# PlatformIO 编译时会自动合并此文件的配置
 
-# ---- CPU 频率 ----
-CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y    # CPU 运行在 240MHz (最大)
+# CPU 频率
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=240
 
-# ---- PSRAM (外部 SPI RAM) 配置 ----
-CONFIG_SPIRAM=y                           # 启用 PSRAM
-CONFIG_SPIRAM_MODE_OCT=y                  # 八线模式 (OPI, 8-bit 并行)
-CONFIG_SPIRAM_SPEED_80M=y                 # PSRAM 时钟: 80MHz
-CONFIG_SPIRAM_USE_MALLOC=y                # 允许 malloc 使用 PSRAM
-CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y        # 允许从 PSRAM 取指令 (扩大可用代码空间)
-CONFIG_SPIRAM_RODATA=y                    # 允许只读数据放入 PSRAM
+# PSRAM (外部 SPI RAM) 配置
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
+CONFIG_SPIRAM_RODATA=y
 
-# ---- FreeRTOS 配置 ----
-CONFIG_FREERTOS_HZ=1000                   # FreeRTOS tick 频率: 1000Hz (1ms 精度)
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192      # 主任务栈大小: 8KB
+# FreeRTOS 配置
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 
-# ---- WiFi 配置 ----
-CONFIG_ESP_WIFI_RX_BA_WIN=16              # WiFi 接收 BA 窗口大小
+# WiFi 配置
+CONFIG_ESP_WIFI_RX_BA_WIN=16
 
-# ---- TCP/IP 配置 ----
-CONFIG_LWIP_TCP_SND_BUF_DEFAULT=8192      # TCP 发送缓冲区: 8KB
-CONFIG_LWIP_TCP_WND_DEFAULT=8192          # TCP 接收窗口: 8KB
+# TCP/IP 配置
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=8192
+CONFIG_LWIP_TCP_WND_DEFAULT=8192
 
-# ---- 控制台输出 ----
-CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y      # 通过 USB Serial/JTAG 输出日志
+# 控制台输出
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
-# ---- 分区表 ----
-CONFIG_PARTITION_TABLE_CUSTOM=y                          # 使用自定义分区表
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"  # 分区表文件名
+# 分区表
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
+
+# WebSocket 传输
+CONFIG_WS_TRANSPORT=y

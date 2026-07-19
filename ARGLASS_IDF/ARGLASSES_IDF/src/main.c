@@ -74,6 +74,7 @@
 #include "music_app.h"     // WAV 音乐播放器模块
 #include "voice_app.h"     // "Jarvis" 唤醒词检测模块 (ESP-SR WakeNet9)
 #include "ai_chat.h"       // AI 语音对话模块 (WebSocket + Opus)
+#include "translate_app.h" // 火山引擎同传 HTTP 客户端
 
 /* ==================== TTS 语音模型外部符号 ==================== */
 /**
@@ -172,6 +173,7 @@ RingbufHandle_t sd_ringbuf = NULL;   // SD 卡录音缓冲区
 RingbufHandle_t yin_ringbuf = NULL;  // YIN 音调检测缓冲区
 RingbufHandle_t sr_ringbuf = NULL;   // 语音唤醒引擎缓冲区
 RingbufHandle_t ai_ringbuf = NULL;   // AI 对话音频缓冲区 (Opus 编码)
+RingbufHandle_t translate_ringbuf = NULL; // 翻译模块音频缓冲区 (64KB PSRAM)
 
 /* =====================================================================
  * UI 控制开关 (通过 UART 命令由外部 MCU 控制)
@@ -468,6 +470,11 @@ void audio_hub_task(void *pvParameters) {
             if ((is_in_call || is_video_recording) && intercom_ringbuf != NULL) {
                 // 超时 0：网络堵塞时直接丢弃，绝不卡死麦克风采集
                 xRingbufferSend(intercom_ringbuf, audioBuffer, bytesRead, 0);
+            }
+
+            /* ---- 7. 发送给翻译模块 ---- */
+            if (translate_is_active() && translate_ringbuf != NULL) {
+                xRingbufferSend(translate_ringbuf, audioBuffer, bytesRead, 0);
             }
         }
     }
@@ -948,6 +955,7 @@ void app_main(void) {
 
     if (init_sd_card() == ESP_OK) {
         test_sd_card_read_write();  // 简单读写测试，验证 SD 卡工作正常
+        list_sdcard_root();         // 列出根目录内容
     } else {
         ESP_LOGE(TAG, "💾 SD 卡模块异常，跳过后续依赖任务...");
     }
@@ -958,6 +966,7 @@ void app_main(void) {
     sr_ringbuf       = create_ringbuf_psram(16384, RINGBUF_TYPE_NOSPLIT);  // 语音唤醒
     ai_ringbuf       = create_ringbuf_psram(16384, RINGBUF_TYPE_NOSPLIT);  // AI 对话
     intercom_ringbuf = create_ringbuf_psram(16384, RINGBUF_TYPE_NOSPLIT);  // 网络对讲
+    translate_ringbuf = create_ringbuf_psram(65536, RINGBUF_TYPE_NOSPLIT); // 翻译模块 (64KB)
 
     if (sd_ringbuf == NULL) {
         ESP_LOGE(TAG, "❌ 致命错误：音频环形缓冲区创建失败！");
@@ -974,6 +983,7 @@ void app_main(void) {
     start_jarvis_brain();   // "Jarvis" 唤醒词检测引擎 (WakeNet9 + AFE)
     wifi_init_sta();        // WiFi STA 连接 (AI 对话依赖网络)
     ai_chat_init();         // AI 语音对话模块 (WebSocket + Opus)
+    translate_app_init(translate_ringbuf); // 火山引擎同传 (传入 PSRAM 缓冲区)
 
     /* ---- 初始化 MQTT 客户端 (用于定时发布噪声数据) ---- */
     esp_mqtt_client_config_t mqtt_cfg = {
@@ -1058,10 +1068,74 @@ void app_main(void) {
     /* ---- 步骤10: TTS 播报启动欢迎语 ---- */
     tts_speak("贾维斯系统已启动");
 
-    /* ---- 主线程进入空循环 ---- */
-    // 所有实际工作都由上面创建的子任务完成
-    // 主线程只需要保持存活，不要退出 app_main()
+    /* ---- 步骤11: USB 串口控制台 ---- */
+    ESP_LOGI(TAG, "========================================");
+    ESP_LOGI(TAG, "  串口命令已就绪 (USB Serial JTAG)");
+    ESP_LOGI(TAG, "  输入 CMD:TRANSLATE_START 启动翻译");
+    ESP_LOGI(TAG, "  输入 CMD:TRANSLATE_STOP 停止翻译");
+    ESP_LOGI(TAG, "========================================");
+
+    /* ---- 主线程进入命令循环 ---- */
+    // 从 USB 串口读取命令
+    char line_buf[128];
     while(1) {
-        vTaskDelay(pdMS_TO_TICKS(10000));  // 每 10 秒唤醒一次 (实际上不需要)
+        // fgets 从 stdin 读取一行 (USB Serial JTAG)
+        if (fgets(line_buf, sizeof(line_buf), stdin) != NULL) {
+            // 去除换行符
+            size_t len = strlen(line_buf);
+            if (len > 0 && (line_buf[len-1] == '\n' || line_buf[len-1] == '\r')) {
+                line_buf[--len] = '\0';
+            }
+            if (len > 0 && (line_buf[len-1] == '\n' || line_buf[len-1] == '\r')) {
+                line_buf[--len] = '\0';
+            }
+
+            ESP_LOGI("CONSOLE", "收到命令: %s", line_buf);
+
+            // 翻译命令
+            if (strncmp(line_buf, "CMD:TRANSLATE_START", 19) == 0) {
+                char *payload = line_buf + 19;
+                if (payload[0] == ':') {
+                    payload++;
+                    char *colon = strchr(payload, ':');
+                    int port = 5001;
+                    if (colon) {
+                        *colon = '\0';
+                        port = atoi(colon + 1);
+                    }
+                    translate_start(payload, port);
+                } else {
+                    translate_start(NULL, 0);
+                }
+            }
+            else if (strncmp(line_buf, "CMD:SET_LANG:", 13) == 0) {
+                char *src_ptr = line_buf + 13;
+                char *tgt_ptr = strchr(src_ptr, ':');
+                if (tgt_ptr) {
+                    *tgt_ptr = '\0';
+                    tgt_ptr++;
+                    translate_set_language(src_ptr, tgt_ptr);
+                    ESP_LOGI("CONSOLE", "⚙️ 语言已切换: %s → %s", src_ptr, tgt_ptr);
+                } else {
+                    ESP_LOGW("CONSOLE", "格式: CMD:SET_LANG:en:zh");
+                }
+            }
+            else if (strncmp(line_buf, "CMD:SET_MODE:", 13) == 0) {
+                char *mode = line_buf + 13;
+                translate_set_mode(mode);
+                ESP_LOGI("CONSOLE", "⚙️ 模式已切换: %s", mode);
+            }
+            else if (strstr(line_buf, "CMD:LIST_SD")) {
+                extern void list_sdcard_root(void);
+                list_sdcard_root();
+            }
+            else if (strstr(line_buf, "CMD:TRANSLATE_STOP")) {
+                translate_stop();
+            }
+            else {
+                ESP_LOGW("CONSOLE", "未知命令: %s", line_buf);
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }

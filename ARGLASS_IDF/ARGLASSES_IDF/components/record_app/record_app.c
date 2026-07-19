@@ -149,14 +149,14 @@ static void write_wav_header(FILE* f, uint32_t sample_rate, uint16_t bits_per_sa
 static void get_next_filename(char *out_filepath, size_t max_len) {
     // 自动创建录音文件夹 (如果已存在则忽略)
     char dir_path[64];
-    snprintf(dir_path, sizeof(dir_path), "%s/录音", MOUNT_POINT);
+    snprintf(dir_path, sizeof(dir_path), "%s/record", MOUNT_POINT);
     mkdir(dir_path, 0777);
 
     // 查找最小可用编号
     struct stat st;
     int file_index = 1;
     while (file_index <= 9999) {
-        snprintf(out_filepath, max_len, "%s/录音/REC_%03d.wav", MOUNT_POINT, file_index);
+        snprintf(out_filepath, max_len, "%s/record/REC_%03d.wav", MOUNT_POINT, file_index);
         if (stat(out_filepath, &st) != 0) {
             break;  // 文件不存在，此编号可用
         }
@@ -514,7 +514,7 @@ esp_err_t take_photo_and_save(void) {
  */
 void scan_and_send_record_list(void) {
     char dir_path[64];
-    snprintf(dir_path, sizeof(dir_path), "%s/录音", MOUNT_POINT);
+    snprintf(dir_path, sizeof(dir_path), "%s/record", MOUNT_POINT);
 
     DIR *dir = opendir(dir_path);
     if (!dir) {

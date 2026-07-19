@@ -3,19 +3,19 @@
 #include "freertos/task.h"
 #include "driver/i2c.h"
 
-#define SDA_PIN 12
-#define SCL_PIN 13
+#define SDA_PIN 2
+#define SCL_PIN 1
 #define I2C_PORT I2C_NUM_0
 #define MPU_ADDR 0x68
 
-// ¼òµ¥µÄ I2C Ð´¼Ä´æÆ÷º¯Êý
+// ï¿½òµ¥µï¿½ I2C Ð´ï¿½Ä´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 void mpu_write(uint8_t reg, uint8_t data) {
     uint8_t buf[] = {reg, data};
     i2c_master_write_to_device(I2C_PORT, MPU_ADDR, buf, 2, pdMS_TO_TICKS(50));
 }
 
 void app_main(void) {
-    // 1. I2C ³õÊ¼»¯
+    // 1. I2C ï¿½ï¿½Ê¼ï¿½ï¿½
     i2c_config_t conf = {};
     conf.mode = I2C_MODE_MASTER;
     conf.sda_io_num = SDA_PIN;
@@ -26,16 +26,16 @@ void app_main(void) {
     i2c_param_config(I2C_PORT, &conf);
     i2c_driver_install(I2C_PORT, conf.mode, 0, 0, 0);
 
-    // 2. MPU6050 ÅäÖÃ£º»½ÐÑ²¢ÉèÖÃÁ¿³Ì
-    mpu_write(0x6B, 0x00); // »½ÐÑ
-    mpu_write(0x1B, 0x08); // ÍÓÂÝÒÇ ¡À500¡ã/s
-    mpu_write(0x1C, 0x08); // ¼ÓËÙ¶È¼Æ ¡À4g
+    // 2. MPU6050 ï¿½ï¿½ï¿½Ã£ï¿½ï¿½ï¿½ï¿½Ñ²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+    mpu_write(0x6B, 0x00); // ï¿½ï¿½ï¿½ï¿½
+    mpu_write(0x1B, 0x08); // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½500ï¿½ï¿½/s
+    mpu_write(0x1C, 0x08); // ï¿½ï¿½ï¿½Ù¶È¼ï¿½ ï¿½ï¿½4g
 
     uint8_t raw[14];
     while (1) {
-        // ¶ÁÈ¡ 14 ×Ö½Ú£¨¼ÓËÙ¶È3Öá + ÎÂ¶È + ÍÓÂÝÒÇ3Öá£©
+        // ï¿½ï¿½È¡ 14 ï¿½Ö½Ú£ï¿½ï¿½ï¿½ï¿½Ù¶ï¿½3ï¿½ï¿½ + ï¿½Â¶ï¿½ + ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½3ï¿½á£©
         if (i2c_master_write_read_device(I2C_PORT, MPU_ADDR, (uint8_t[]){0x3B}, 1, raw, 14, pdMS_TO_TICKS(50)) == ESP_OK) {
-            // ½âÎöÊý¾Ý²¢¼ÓÈëÄãµÄÓ²¼þÁãÆ«Ð£×¼
+            // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ý²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ó²ï¿½ï¿½ï¿½ï¿½Æ«Ð£×¼
             int16_t ax = (raw[0] << 8) | raw[1];
             int16_t ay = (raw[2] << 8) | raw[3];
             int16_t az = (raw[4] << 8) | raw[5];
@@ -43,11 +43,11 @@ void app_main(void) {
             int16_t gy = (int16_t)((raw[10] << 8) | raw[11]) + 100;
             int16_t gz = (int16_t)((raw[12] << 8) | raw[13]) + 20;
 
-            // ÑÏ¸ñ°´ÕÕ Python ½Å±¾ÒªÇóµÄ¸ñÊ½´òÓ¡
+            // ï¿½Ï¸ï¿½ï¿½ï¿½ Python ï¿½Å±ï¿½Òªï¿½ï¿½Ä¸ï¿½Ê½ï¿½ï¿½Ó¡
             printf("IMU\n%d, %d, %d, %d, %d, %d\n", ax, ay, az, gx, gy, gz);
         }
         
-        // 10ms ÑÓÊ±£¬È·±£ 100Hz ²ÉÑùÂÊ
+        // 10ms ï¿½ï¿½Ê±ï¿½ï¿½È·ï¿½ï¿½ 100Hz ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 }

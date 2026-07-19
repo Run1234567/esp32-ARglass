@@ -182,6 +182,30 @@ void test_sd_card_read_write(void) {
 }
 
 /* =====================================================================
+ * 列出 SD 卡根目录内容
+ * ===================================================================== */
+void list_sdcard_root(void) {
+    DIR *dir = opendir(MOUNT_POINT);
+    if (dir == NULL) {
+        ESP_LOGE(TAG, "无法打开 SD 卡根目录!");
+        return;
+    }
+
+    ESP_LOGI(TAG, "===== SD 卡根目录内容 =====");
+    struct dirent *ent;
+    int count = 0;
+    while ((ent = readdir(dir)) != NULL) {
+        ESP_LOGI(TAG, "  [%s] %s", (ent->d_type == DT_DIR) ? "DIR" : "FILE", ent->d_name);
+        count++;
+    }
+    if (count == 0) {
+        ESP_LOGW(TAG, "  (空目录)");
+    }
+    ESP_LOGI(TAG, "===========================");
+    closedir(dir);
+}
+
+/* =====================================================================
  * 文本净化器 - 为 TTS 清理文本
  * =====================================================================
  * @brief 去除字符串中的英文字母和控制字符，只保留中文和标点
@@ -329,7 +353,7 @@ void test_read_novel_next_chunk(void) {
  */
 void scan_and_send_music_list(void) {
     char dir_path[64];
-    snprintf(dir_path, sizeof(dir_path), "%s/音乐", MOUNT_POINT);
+    snprintf(dir_path, sizeof(dir_path), "%s/music", MOUNT_POINT);
 
     DIR *dir = opendir(dir_path);
     if (dir == NULL) {
@@ -381,7 +405,7 @@ void scan_and_send_music_list(void) {
 void send_lrc_to_ui(const char* song_name) {
     /* ---- 构建 LRC 文件路径 ---- */
     char lrc_path[128];
-    snprintf(lrc_path, sizeof(lrc_path), "%s/音乐/%s", MOUNT_POINT, song_name);
+    snprintf(lrc_path, sizeof(lrc_path), "%s/music/%s", MOUNT_POINT, song_name);
 
     // 将扩展名替换为 .lrc (如 "歌曲1.wav" -> "歌曲1.lrc")
     char *ext = strrchr(lrc_path, '.');
@@ -456,7 +480,7 @@ void send_lrc_to_ui(const char* song_name) {
  */
 void scan_and_send_book_list(int offset) {
     char dir_path[64];
-    snprintf(dir_path, sizeof(dir_path), "%s/小说", MOUNT_POINT);
+    snprintf(dir_path, sizeof(dir_path), "%s/novel", MOUNT_POINT);
 
     DIR *dir = opendir(dir_path);
     if (!dir) {
@@ -535,7 +559,7 @@ void scan_and_send_book_list(int offset) {
  */
 void scan_and_send_chapter_list(const char* book_name, int offset) {
     char dir_path[128];
-    snprintf(dir_path, sizeof(dir_path), "%s/小说/%s", MOUNT_POINT, book_name);
+    snprintf(dir_path, sizeof(dir_path), "%s/novel/%s", MOUNT_POINT, book_name);
 
     DIR *dir = opendir(dir_path);
     if (!dir) {

@@ -14,10 +14,12 @@ idf_component_register(
     INCLUDE_DIRS
         "."
         "${OPUS_SRC_DIR}"
+    REQUIRES
+        esp_ringbuf
     PRIV_REQUIRES
         esp_http_client
         esp_event
-        json
+        cjson
         freertos
         log
         speaker_app

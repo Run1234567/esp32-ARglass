@@ -86,6 +86,7 @@
 #include "sd_card_app.h"        // SD 卡模块 (书籍/音乐扫描)
 #include "record_app.h"         // 录音模块
 #include "music_app.h"          // 音乐播放模块
+#include "translate_app.h"      // 火山引擎同传
 
 static const char *TAG = "MY_UART";  // 日志标签
 
@@ -216,7 +217,7 @@ static void uart_event_task(void *pvParameters)
                             extern SemaphoreHandle_t next_page_sem;
                             // 构建完整路径并设置全局变量
                             snprintf(current_novel_path, sizeof(current_novel_path),
-                                     "%s/小说/%s", MOUNT_POINT, rel_path);
+                                     "%s/novel/%s", MOUNT_POINT, rel_path);
                             current_file_offset = 0;  // 重置书签到文件开头
 
                             ESP_LOGI(TAG, "准备阅读: %s", current_novel_path);
@@ -251,7 +252,7 @@ static void uart_event_task(void *pvParameters)
                         else if (strstr(cmd_line, "CMD:PLAY_REC:") != NULL) {
                             char *filename = strstr(cmd_line, "CMD:PLAY_REC:") + 13;
                             char full_path[128];
-                            snprintf(full_path, sizeof(full_path), "%s/录音/%s", MOUNT_POINT, filename);
+                            snprintf(full_path, sizeof(full_path), "%s/record/%s", MOUNT_POINT, filename);
                             extern void start_music_player(const char *path);
                             start_music_player(full_path);  // 复用音乐播放器
                         }
@@ -290,7 +291,7 @@ static void uart_event_task(void *pvParameters)
                         else if (strstr(cmd_line, "CMD:PLAY_YY:")) {
                             char *filename = strstr(cmd_line, "CMD:PLAY_YY:") + 12;
                             char full_path[128];
-                            snprintf(full_path, sizeof(full_path), "%s/音乐/%s", MOUNT_POINT, filename);
+                            snprintf(full_path, sizeof(full_path), "%s/music/%s", MOUNT_POINT, filename);
                             // 先加载歌词
                             extern void send_lrc_to_ui(const char* song_name);
                             send_lrc_to_ui(filename);
@@ -328,6 +329,61 @@ static void uart_event_task(void *pvParameters)
                         }
                         else if (strstr(cmd_line, "CMD:PITCH_OFF")) {
                             extern void stop_yin_pitch_task(void); stop_yin_pitch_task();
+                        }
+
+                        // ================= 同传翻译 / 语音转文本指令 =================
+
+                        // 1. 设置语言: CMD:SET_LANG:zh:en
+                        else if (strncmp(cmd_line, "CMD:SET_LANG:", 13) == 0) {
+                            char *src_ptr = cmd_line + 13;
+                            char *tgt_ptr = strchr(src_ptr, ':');
+                            if (tgt_ptr) {
+                                *tgt_ptr = '\0';
+                                tgt_ptr++;
+                                tgt_ptr[strcspn(tgt_ptr, "\r\n")] = '\0';
+
+                                extern void translate_set_language(const char *src, const char *tgt);
+                                translate_set_language(src_ptr, tgt_ptr);
+                                ESP_LOGI(TAG, "⚙️ 语言切换: %s → %s", src_ptr, tgt_ptr);
+                            }
+                        }
+
+                        // 2. 设置模式: CMD:SET_MODE:s2s 或 CMD:SET_MODE:s2t
+                        else if (strncmp(cmd_line, "CMD:SET_MODE:", 13) == 0) {
+                            char *mode = cmd_line + 13;
+                            mode[strcspn(mode, "\r\n")] = '\0';
+
+                            extern void translate_set_mode(const char *mode);
+                            translate_set_mode(mode);
+                            ESP_LOGI(TAG, "⚙️ 模式切换: %s", mode);
+                        }
+
+                        // 3. 启动翻译: CMD:TRANSLATE_START
+                        else if (strncmp(cmd_line, "CMD:TRANSLATE_START", 19) == 0) {
+                            char *payload = cmd_line + 19;
+                            if (payload[0] == ':') {
+                                // 指定了地址: CMD:TRANSLATE_START:IP:PORT
+                                payload++;
+                                char *colon = strchr(payload, ':');
+                                int port = 5001;
+                                if (colon) {
+                                    *colon = '\0';
+                                    port = atoi(colon + 1);
+                                }
+                                ESP_LOGI(TAG, "🌐 翻译启动: %s:%d", payload, port);
+                                extern void translate_start(const char *server_ip, int port);
+                                translate_start(payload, port);
+                            } else {
+                                // 使用默认地址
+                                ESP_LOGI(TAG, "🌐 翻译启动 (默认地址)");
+                                extern void translate_start(const char *server_ip, int port);
+                                translate_start(NULL, 0);
+                            }
+                        }
+                        else if (strstr(cmd_line, "CMD:TRANSLATE_STOP")) {
+                            ESP_LOGI(TAG, "🌐 翻译停止");
+                            extern void translate_stop(void);
+                            translate_stop();
                         }
 
                         // ================= 接收 WiFi 账号密码 =================

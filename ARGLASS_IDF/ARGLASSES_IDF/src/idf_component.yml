@@ -1,2 +1,5 @@
 dependencies:
   espressif/esp-sr: "*"
+  espressif/dl_fft: "*"
+  espressif/esp-dsp: "*"
+  espressif/cjson: "*"

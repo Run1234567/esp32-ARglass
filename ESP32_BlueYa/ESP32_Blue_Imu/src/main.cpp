@@ -54,8 +54,8 @@ TfLiteTensor* output = nullptr;
 static esp_err_t i2c_master_init(void) {
     i2c_config_t conf = {};
     conf.mode = I2C_MODE_MASTER;
-    conf.sda_io_num = I2C_MASTER_SDA_IO;
-    conf.scl_io_num = I2C_MASTER_SCL_IO;
+    conf.sda_io_num = (gpio_num_t)I2C_MASTER_SDA_IO;
+    conf.scl_io_num = (gpio_num_t)I2C_MASTER_SCL_IO;
     conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
     conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
     conf.master.clk_speed = 400000;
@@ -100,8 +100,9 @@ static const struct ble_gatt_chr_def gatt_svr_chrs[] = {
         .flags = BLE_GATT_CHR_F_NOTIFY,
         .min_key_size = 0,
         .val_handle = &notify_chr_val_handle,
-    }, 
-    { 0 } // 结尾标志
+        .cpfd = NULL,
+    },
+    { NULL, NULL, NULL, NULL, 0, 0, NULL, NULL }
 };
 
 static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
@@ -110,8 +111,8 @@ static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
         .uuid = &svc_uuid.u,
         .includes = NULL,
         .characteristics = gatt_svr_chrs
-    }, 
-    { 0 } // 结尾标志
+    },
+    { 0, NULL, NULL, NULL }
 };
 
 static int ble_gap_event(struct ble_gap_event *event, void *arg) {

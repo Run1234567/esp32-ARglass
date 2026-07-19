@@ -4,6 +4,7 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "driver/gpio.h"
+#include "driver/i2c_master.h"
 #include "esp_log.h"
 
 // --- NimBLE 蓝牙协议栈 ---
@@ -18,13 +19,28 @@
 static const char *TAG = "TRACKBALL";
 
 // ==========================================================
+// MPU6050 I2C 配置
+// ==========================================================
+#define I2C_MASTER_SCL_IO        8
+#define I2C_MASTER_SDA_IO        9
+#define I2C_MASTER_NUM           I2C_NUM_0
+#define I2C_MASTER_FREQ_HZ       400000
+#define MPU6050_ADDR             0x68
+#define MPU6050_WHO_AM_I_REG     0x75
+#define MPU6050_PWR_MGMT_1_REG   0x6B
+#define MPU6050_ACCEL_XOUT_H     0x3B
+
+static i2c_master_bus_handle_t bus_handle;
+static i2c_master_dev_handle_t mpu_handle;
+
+// ==========================================================
 // 1. 轨迹球硬件引脚定义
 // ==========================================================
-#define TB_PIN_UP     GPIO_NUM_4
-#define TB_PIN_DOWN   GPIO_NUM_5
-#define TB_PIN_LEFT   GPIO_NUM_7
-#define TB_PIN_RIGHT  GPIO_NUM_6
-#define TB_PIN_BTN    GPIO_NUM_3
+#define TB_PIN_UP     GPIO_NUM_5
+#define TB_PIN_DOWN   GPIO_NUM_4
+#define TB_PIN_LEFT   GPIO_NUM_3
+#define TB_PIN_RIGHT  GPIO_NUM_2
+#define TB_PIN_BTN    GPIO_NUM_1
 
 typedef enum {
     TB_EVENT_UP,
@@ -238,11 +254,112 @@ void trackball_task(void* arg)
 }
 
 // ==========================================================
-// 5. 主函数
+// 5. MPU6050 I2C 初始化与读取
+// ==========================================================
+void mpu6050_init(void)
+{
+    // 配置 I2C 主机
+    i2c_master_bus_config_t bus_config = {
+        .i2c_port = I2C_MASTER_NUM,
+        .sda_io_num = I2C_MASTER_SDA_IO,
+        .scl_io_num = I2C_MASTER_SCL_IO,
+        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .glitch_ignore_cnt = 7,
+        .flags.enable_internal_pullup = true,
+    };
+    esp_err_t ret = i2c_new_master_bus(&bus_config, &bus_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "I2C 总线初始化失败: %s", esp_err_to_name(ret));
+        return;
+    }
+    ESP_LOGI(TAG, "I2C 总线初始化成功 (SCL=%d, SDA=%d)", I2C_MASTER_SCL_IO, I2C_MASTER_SDA_IO);
+
+    // 配置 MPU6050 设备
+    i2c_device_config_t dev_config = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = MPU6050_ADDR,
+        .scl_speed_hz = I2C_MASTER_FREQ_HZ,
+    };
+    ret = i2c_master_bus_add_device(bus_handle, &dev_config, &mpu_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "添加 MPU6050 设备失败: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    // 检测 MPU6050 是否存在 (读 WHO_AM_I)
+    uint8_t who_am_i = 0;
+    uint8_t reg = MPU6050_WHO_AM_I_REG;
+    ret = i2c_master_transmit_receive(mpu_handle, &reg, 1, &who_am_i, 1, 1000);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "读取 MPU6050 WHO_AM_I 失败: %s", esp_err_to_name(ret));
+        return;
+    }
+    ESP_LOGI(TAG, "MPU6050 WHO_AM_I = 0x%02X (应为 0x68)", who_am_i);
+
+    // 唤醒 MPU6050 (清零 sleep bit)
+    uint8_t wake_cmd[] = {MPU6050_PWR_MGMT_1_REG, 0x00};
+    ret = i2c_master_transmit(mpu_handle, wake_cmd, 2, 1000);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "唤醒 MPU6050 失败: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    ESP_LOGI(TAG, "MPU6050 初始化完成");
+}
+
+void mpu6050_read_task(void *arg)
+{
+    uint8_t data[14];
+    int16_t ax, ay, az, gx, gy, gz;
+
+    while (1) {
+        // 从 0x3B 开始读取 14 字节 (加速度 + 温度 + 陀螺仪)
+        uint8_t reg = MPU6050_ACCEL_XOUT_H;
+        esp_err_t ret = i2c_master_transmit_receive(mpu_handle, &reg, 1, data, 14, 1000);
+
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "MPU6050 读取失败: %s", esp_err_to_name(ret));
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
+
+        // 解析加速度 (原始值)
+        ax = (int16_t)((data[0] << 8) | data[1]);
+        ay = (int16_t)((data[2] << 8) | data[3]);
+        az = (int16_t)((data[4] << 8) | data[5]);
+
+        // 解析温度
+        int16_t temp_raw = (int16_t)((data[6] << 8) | data[7]);
+        float temp = temp_raw / 340.0f + 36.53f;
+
+        // 解析陀螺仪 (原始值)
+        gx = (int16_t)((data[8] << 8) | data[9]);
+        gy = (int16_t)((data[10] << 8) | data[11]);
+        gz = (int16_t)((data[12] << 8) | data[13]);
+
+        // 打印到串口
+        printf("Accel: X=%6d Y=%6d Z=%6d | Gyro: X=%6d Y=%6d Z=%6d | Temp: %.1f°C\n",
+               ax, ay, az, gx, gy, gz, temp);
+
+        vTaskDelay(pdMS_TO_TICKS(100));  // 10Hz 采样
+    }
+}
+
+// ==========================================================
+// 6. 主函数
 // ==========================================================
 void app_main(void)
 {
+    // I2C + MPU6050 初始化
+    mpu6050_init();
+
+    // BLE 初始化
     ble_init();
+
+    // 轨迹球初始化
     trackball_init();
     xTaskCreate(trackball_task, "trackball_task", 4096, NULL, 5, NULL);
+
+    // MPU6050 读取任务
+    xTaskCreate(mpu6050_read_task, "mpu6050_task", 4096, NULL, 4, NULL);
 }

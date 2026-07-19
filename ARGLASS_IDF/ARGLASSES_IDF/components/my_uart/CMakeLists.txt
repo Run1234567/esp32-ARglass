@@ -11,4 +11,4 @@
 
 idf_component_register(SRCS "my_uart.c"
                     INCLUDE_DIRS "."
-                    REQUIRES driver sd_card_app record_app music_app)
+                    REQUIRES esp_driver_uart esp_driver_gpio esp_ringbuf sd_card_app record_app music_app translate_app)

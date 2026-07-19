@@ -58,6 +58,11 @@ esp_err_t init_sd_card(void);
 void test_sd_card_read_write(void);
 
 /**
+ * @brief 列出 SD 卡根目录所有文件和文件夹
+ */
+void list_sdcard_root(void);
+
+/**
  * @brief 读取下一段小说文本并播报/显示
  *
  * 从 current_novel_path 的 current_file_offset 位置读取 128 字节，
