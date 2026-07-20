@@ -55,7 +55,8 @@ typedef enum {
     SCREEN_HEALTH,          // 27. 心率血氧监测
     SCREEN_TRANSLATE_MODE,  // 28. 翻译模式选择
     SCREEN_TRANSLATE_LANG,  // 29. 翻译语言选择
-    SCREEN_TRANSLATE        // 30. 翻译模式
+    SCREEN_TRANSLATE,       // 30. 翻译模式
+    SCREEN_STEP             // 31. 计步器
 } ui_screen_state_t;
 
 // ============================================================

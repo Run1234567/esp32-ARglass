@@ -4,8 +4,13 @@
 #include "esp_timer.h"    // 引入 ESP32 高精度定时器
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 #include "driver/i2c.h"
 #include "esp_log.h"
+
+// --- 计步器全局变量 ---
+QueueHandle_t accel_queue = NULL;
+uint32_t step_count = 0;
 
 static const char *TAG = "MPU6050";
 // 定义姿态数据及四元数结构体
@@ -22,7 +27,7 @@ typedef struct {
 #define I2C_MASTER_SCL_IO           1
 #define I2C_MASTER_SDA_IO           2
 #define I2C_MASTER_NUM              I2C_NUM_0
-#define I2C_MASTER_FREQ_HZ          400000
+#define I2C_MASTER_FREQ_HZ          100000
 #define MPU6050_ADDR                0x68
 #define MPU6050_PWR_MGMT_1_REG      0x6B
 #define MPU6050_ACCEL_XOUT_H_REG    0x3B
@@ -164,8 +169,88 @@ static void process_imu_data(int16_t ax_raw, int16_t ay_raw, int16_t az_raw,
     attitude.roll = atan2f(2*(attitude.q0*attitude.q1 + attitude.q2*attitude.q3), 
                            1 - 2*(attitude.q1*attitude.q1 + attitude.q2*attitude.q2)) * RAD_TO_DEG;
     attitude.pitch = asinf(2*(attitude.q0*attitude.q2 - attitude.q3*attitude.q1)) * RAD_TO_DEG;
-    attitude.yaw = atan2f(2*(attitude.q0*attitude.q3 + attitude.q1*attitude.q2), 
+    attitude.yaw = atan2f(2*(attitude.q0*attitude.q3 + attitude.q1*attitude.q2),
                           1 - 2*(attitude.q2*attitude.q2 + attitude.q3*attitude.q3)) * RAD_TO_DEG;
+}
+
+// ==========================================
+// 任务函数：独立计步器
+// ==========================================
+void step_counter_task(void *pvParameters) {
+    float accel_val;
+    float accel_buffer[5] = {0}; // 5点滑动平均缓存
+    uint8_t buf_idx = 0;
+
+    // MPU6050 ±2g 量程下，1g 约等于 16384
+    float max_val = 0;
+    float min_val = 32768.0f;
+    float threshold = 32000.0f; // 初始阈值（约2g，需要明显晃动才计步）
+
+    float last_smoothed_accel = 32000.0f;
+    uint32_t sample_count = 0;
+    int64_t last_step_time = 0;
+    uint32_t debug_count = 0;
+
+    // 动态阈值更新窗口大小
+    const uint32_t WINDOW_SIZE = 50;
+    // 防抖：步伐之间的最小间隔，600ms 对应极限 1.7步/秒（正常走路约1.5-2步/秒）
+    const int64_t MIN_STEP_DELAY_US = 600000;
+
+    ESP_LOGI("STEP", "计步器任务已启动，等待数据...");
+
+    while (1) {
+        // 阻塞等待队列中的加速度数据（由 MPU6050 读取任务发送）
+        if (xQueueReceive(accel_queue, &accel_val, portMAX_DELAY) == pdTRUE) {
+
+            // 调试：打印原始加速度值（每100次打印一次）
+            if (++debug_count >= 100) {
+                ESP_LOGI("STEP", "原始加速度: %.1f | 阈值: %.1f", accel_val, threshold);
+                debug_count = 0;
+            }
+
+            // 1. 滑动平均滤波
+            accel_buffer[buf_idx] = accel_val;
+            buf_idx = (buf_idx + 1) % 5;
+            float smoothed_accel = 0;
+            for(int i = 0; i < 5; i++) {
+                smoothed_accel += accel_buffer[i];
+            }
+            smoothed_accel /= 5.0f;
+
+            // 2. 更新最大值与最小值
+            if (smoothed_accel > max_val) max_val = smoothed_accel;
+            if (smoothed_accel < min_val) min_val = smoothed_accel;
+
+            sample_count++;
+
+            // 3. 动态更新阈值
+            if (sample_count >= WINDOW_SIZE) {
+                // 如果这段时间内的震动幅度足够大（大于 1500 LSB，过滤微小抖动）
+                if ((max_val - min_val) > 1500.0f) {
+                    threshold = (max_val + min_val) / 2.0f;
+                } else {
+                    threshold = 16384.0f; // 震动太小，恢复基准重力阈值
+                }
+                // 重置统计变量
+                max_val = 0;
+                min_val = 32768.0f;
+                sample_count = 0;
+            }
+
+            // 4. 波峰检测与时间防抖
+            int64_t current_time = esp_timer_get_time();
+            // 上升沿穿过阈值
+            if (smoothed_accel > threshold && last_smoothed_accel <= threshold) {
+                if ((current_time - last_step_time) > MIN_STEP_DELAY_US) {
+                    step_count++; // 有效计步
+                    last_step_time = current_time;
+                    ESP_LOGI("STEP", "检测到步伐！当前总步数: %lu", step_count);
+                }
+            }
+
+            last_smoothed_accel = smoothed_accel;
+        }
+    }
 }
 
 // ==========================================
@@ -188,6 +273,16 @@ void read_mpu6050_task(void *pvParameters) {
 
             // 🚀 将读到的数据直接扔进解算器
             process_imu_data(accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z);
+
+            // ----------------------------------------------------
+            // 🚀 计算三轴加速度总模长，并发送给计步任务
+            // ----------------------------------------------------
+            float raw_norm_acc = sqrtf((float)accel_x*accel_x + (float)accel_y*accel_y + (float)accel_z*accel_z);
+            if (accel_queue != NULL) {
+                // 等待时间设为0，防止队列满时阻塞IMU数据读取
+                xQueueSend(accel_queue, &raw_norm_acc, 0);
+            }
+            // ----------------------------------------------------
 
             // 串口输出陀螺仪数据（每500次打印一次，约5秒 @200Hz）
             static int print_count = 0;

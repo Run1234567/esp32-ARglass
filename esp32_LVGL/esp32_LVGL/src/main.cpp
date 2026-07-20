@@ -61,7 +61,7 @@ LV_FONT_DECLARE(my_font_cn_16);
 #define I2C_MASTER_SCL_IO           1
 #define I2C_MASTER_SDA_IO           2
 #define I2C_MASTER_NUM              I2C_NUM_0
-#define I2C_MASTER_FREQ_HZ          50000
+#define I2C_MASTER_FREQ_HZ          100000
 
 static const char *TAG = "MAIN";
 
@@ -237,6 +237,10 @@ static void sensor_mqtt_task(void *arg) {
         int32_t enc_count = encoder_get_count();
         ESP_LOGI("ENCODER", "计数: %d", enc_count);
 
+        // 步数
+        extern uint32_t step_count;
+        ESP_LOGI("STEP", "当前步数: %lu", step_count);
+
         // GPS 经纬度
         gps_data_t gps = gps_get_data();
         if (gps.valid) {
@@ -322,6 +326,8 @@ void magic_wand_task(void *pvParameters) {
             // 读取 MPU6050 (0x68) 的加速度与陀螺仪数据
             if (i2c_master_write_read_device(I2C_MASTER_NUM, 0x68, (uint8_t[]){0x3B}, 1, data, 14, 10) == ESP_OK) {
                 i2c_read_success = true;
+            } else {
+                ESP_LOGE("WAND", "I2C 读取 MPU6050 失败！");
             }
             xSemaphoreGive(i2c_mutex);
         }
@@ -333,6 +339,18 @@ void magic_wand_task(void *pvParameters) {
             float gx = (int16_t)((data[8] << 8) | data[9]) + 478.0f;
             float gy = (int16_t)((data[10] << 8) | data[11]) + 100.0f;
             float gz = (int16_t)((data[12] << 8) | data[13]) + 20.0f;
+
+            // 发送加速度到计步器队列
+            if (accel_queue != NULL) {
+                float raw_norm_acc = sqrtf(ax*ax + ay*ay + az*az);
+                xQueueSend(accel_queue, &raw_norm_acc, 0);
+                // 调试：打印原始加速度
+                static int acc_debug = 0;
+                if (++acc_debug >= 50) {
+                    ESP_LOGI("WAND", "加速度: %.1f (ax:%.0f ay:%.0f az:%.0f)", raw_norm_acc, ax, ay, az);
+                    acc_debug = 0;
+                }
+            }
 
             if (model_input == nullptr) {
                 vTaskDelay(pdMS_TO_TICKS(1000));
@@ -363,25 +381,29 @@ void magic_wand_task(void *pvParameters) {
 
                     // 运行模型推理
                     if (interpreter->Invoke() == kTfLiteOk) {
-                        float p_up     = model_output->data.f[0];
-                        float p_down   = model_output->data.f[1];
-                        float p_left   = model_output->data.f[2];
-                        float p_right  = model_output->data.f[3];
-                        float p_circle = model_output->data.f[4];
+                        // 7个动作: 0=下 1=上 2=左 3=右 4=左敲 5=右敲 6=无动作
+                        float p_down    = model_output->data.f[0];
+                        float p_up      = model_output->data.f[1];
+                        float p_left    = model_output->data.f[2];
+                        float p_right   = model_output->data.f[3];
+                        float p_tap_l   = model_output->data.f[4];
+                        float p_tap_r   = model_output->data.f[5];
 
                         ui_cmd_t cmd = UI_CMD_NONE;
 
                         // 映射魔杖动作到统一的 UI 指令
                         if (p_up > 0.8f) {
-                            ESP_LOGW(TAG, "✨ 魔杖施法: 上滑"); cmd = UI_CMD_UP;
+                            ESP_LOGW(TAG, "✨ 魔杖施法: 上滑 (%.0f%%)", p_up*100); cmd = UI_CMD_UP;
                         } else if (p_down > 0.8f) {
-                            ESP_LOGW(TAG, "✨ 魔杖施法: 下滑"); cmd = UI_CMD_DOWN;
+                            ESP_LOGW(TAG, "✨ 魔杖施法: 下滑 (%.0f%%)", p_down*100); cmd = UI_CMD_DOWN;
                         } else if (p_left > 0.8f) {
-                            ESP_LOGW(TAG, "✨ 魔杖施法: 左挥"); cmd = UI_CMD_LEFT;
+                            ESP_LOGW(TAG, "✨ 魔杖施法: 左挥 (%.0f%%)", p_left*100); cmd = UI_CMD_LEFT;
                         } else if (p_right > 0.8f) {
-                            ESP_LOGW(TAG, "✨ 魔杖施法: 右挥"); cmd = UI_CMD_RIGHT;
-                        } else if (p_circle > 0.8f) {
-                            ESP_LOGW(TAG, "✨ 魔杖施法: 画圈"); cmd = UI_CMD_CIRCLE;
+                            ESP_LOGW(TAG, "✨ 魔杖施法: 右挥 (%.0f%%)", p_right*100); cmd = UI_CMD_RIGHT;
+                        } else if (p_tap_l > 0.8f) {
+                            ESP_LOGW(TAG, "✨ 魔杖施法: 左敲 (%.0f%%)", p_tap_l*100); cmd = UI_CMD_CIRCLE;
+                        } else if (p_tap_r > 0.8f) {
+                            ESP_LOGW(TAG, "✨ 魔杖施法: 右敲 (%.0f%%)", p_tap_r*100); cmd = UI_CMD_CIRCLE;
                         }
 
                         // 如果识别成功，触发震动反馈并发送给 UI 队列
@@ -552,6 +574,15 @@ extern "C" void app_main(void) {
     StaticTask_t *wand_tcb = (StaticTask_t *)heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (wand_stack && wand_tcb) {
         xTaskCreateStatic(magic_wand_task, "ai_wand", 8192/sizeof(StackType_t), NULL, 5, wand_stack, wand_tcb);
+    }
+
+    // ==========================================
+    // 🚶 【新增】创建计步器队列和任务
+    // ==========================================
+    accel_queue = xQueueCreate(20, sizeof(float));
+    if (accel_queue != NULL) {
+        xTaskCreatePinnedToCore(step_counter_task, "step_counter", 4096, NULL, 4, NULL, 0);
+        ESP_LOGI(TAG, "计步器任务已启动");
     }
 
     // 继续启动剩余的传感器任务（BMP280 等）

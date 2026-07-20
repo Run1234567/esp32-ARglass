@@ -16,8 +16,8 @@ static const char *TAG = "PAJ7620";
 // ---- 硬件配置 ----
 #define PAJ7620_SCL         1
 #define PAJ7620_SDA         2
-#define PAJ7620_I2C_PORT    I2C_NUM_1
-#define PAJ7620_I2C_FREQ    10000
+#define PAJ7620_I2C_PORT    I2C_NUM_0
+#define PAJ7620_I2C_FREQ    100000
 static uint8_t paj7620_addr = 0x73; // 运行时自动探测
 #define PAJ7620_TIMEOUT     1000
 
@@ -90,23 +90,12 @@ static esp_err_t paj7620_write_array(const uint16_t *array, size_t size) {
 esp_err_t paj7620_init(void) {
     if (is_initialized) return ESP_OK;
 
-    i2c_config_t conf = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = PAJ7620_SDA,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_io_num = PAJ7620_SCL,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = PAJ7620_I2C_FREQ,
-    };
-    esp_err_t err = i2c_param_config(PAJ7620_I2C_PORT, &conf);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "I2C config failed: %s", esp_err_to_name(err));
-        return err;
-    }
-    err = i2c_driver_install(PAJ7620_I2C_PORT, conf.mode, 0, 0, 0);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "I2C install failed: %s", esp_err_to_name(err));
-        return err;
+    // PAJ7620 与 MPU6050/BMP280 共享 I2C_NUM_0（GPIO 1/2）
+    // I2C 总线已在 main.cpp 的 i2c_master_init() 中初始化，无需重复初始化
+    // 直接检查 I2C 驱动是否已安装
+    if (i2c_driver_install(PAJ7620_I2C_PORT, I2C_MODE_MASTER, 0, 0, 0) != ESP_OK) {
+        // 驱动已安装，忽略错误
+        ESP_LOGI(TAG, "I2C 驱动已存在，跳过初始化");
     }
 
     // 尝试两个可能的地址（0x73 和 0x70）

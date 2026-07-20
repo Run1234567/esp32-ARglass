@@ -6,6 +6,8 @@
     <title>环境监测 - AR GLASS</title>
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Chart.js 时间轴适配器 -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
@@ -434,11 +436,13 @@
     <script>
         document.getElementById('backBtn').addEventListener('click', () => { window.history.back(); });
 
-        // ==================== 时间格式化工具 ====================
+        // ==================== 时间格式化工具（东八区） ====================
+
         function formatTime(dateString) {
+            // 如果有传入时间字符串（来自数据库，已是东八区），直接解析
+            // 如果没有传入，获取当前东八区时间
             const date = dateString ? new Date(dateString) : new Date();
-            // 只取时分秒，例如 "14:30:05"
-            return date.toLocaleTimeString('zh-CN', { hour12: false });
+            return dateString ? new Date(dateString) : new Date();
         }
 
         // ==================== 数据历史存储逻辑 ====================
@@ -484,7 +488,16 @@
                 scales: {
                     // 👇 开启 X 轴显示
                     x: {
-                        display: true,
+                        
+                        type: 'time',
+                        time: {
+                            unit: 'second',
+                            displayFormats: {
+                                second: 'HH:mm:ss',
+                                minute: 'HH:mm'
+                            },
+                            tooltipFormat: 'yyyy-MM-dd HH:mm:ss'
+                        },
                         grid: { display: false },
                         ticks: { color: 'rgba(255, 255, 255, 0.4)', font: { size: 10, family: 'system-ui' }, maxTicksLimit: 6 }
                     },

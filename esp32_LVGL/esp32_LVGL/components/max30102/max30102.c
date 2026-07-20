@@ -28,7 +28,7 @@ static const char *TAG = "MAX30102";
 #define I2C_PORT            I2C_NUM_1
 #define MAX30102_SCL        38
 #define MAX30102_SDA        39
-#define MAX30102_I2C_FREQ   400000
+#define MAX30102_I2C_FREQ   100000
 
 // ---- 任务配置 ----
 #define HR_TASK_STACK       4096
@@ -129,14 +129,13 @@ esp_err_t max30102_init(void) {
     if (is_initialized) return ESP_OK;
 
     // 0. 初始化独立 I2C 总线（GPIO 38/39）
-    i2c_config_t conf = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = (gpio_num_t)MAX30102_SDA,
-        .scl_io_num = (gpio_num_t)MAX30102_SCL,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = MAX30102_I2C_FREQ,
-    };
+    i2c_config_t conf = {};
+    conf.mode = I2C_MODE_MASTER;
+    conf.sda_io_num = (gpio_num_t)MAX30102_SDA;
+    conf.scl_io_num = (gpio_num_t)MAX30102_SCL;
+    conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
+    conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
+    conf.master.clk_speed = MAX30102_I2C_FREQ;
     esp_err_t err = i2c_param_config(I2C_PORT, &conf);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "I2C 配置失败: %s", esp_err_to_name(err));

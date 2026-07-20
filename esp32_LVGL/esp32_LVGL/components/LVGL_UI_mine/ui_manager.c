@@ -51,6 +51,7 @@
 #include "ui_translate_screen.h"   // 翻译模式
 #include "ui_translate_lang_screen.h" // 翻译语言选择
 #include "ui_translate_mode_screen.h" // 翻译模式选择
+#include "ui_step_screen.h"        // 计步器
 #include "max30102.h"          // MAX30102 心率传感器
 #include "my_uart.h"           // UART 串口通信模块
 
@@ -121,6 +122,7 @@ void switch_to_screen(ui_screen_state_t target_screen) {
         case SCREEN_TRANSLATE_MODE: target_obj = ui_translate_mode_screen; break;
         case SCREEN_TRANSLATE_LANG: target_obj = ui_translate_lang_screen; break;
         case SCREEN_TRANSLATE:   target_obj = ui_translate_screen; break;
+        case SCREEN_STEP:        target_obj = ui_step_screen; break;
         default: return; 
     }
 
@@ -276,6 +278,7 @@ static void process_ui_command(ui_cmd_t cmd) {
                 if (selected_idx == 16) switch_to_screen(SCREEN_AUDIO_SWITCH);
                 if (selected_idx == 17) switch_to_screen(SCREEN_VIDEO);
                 if (selected_idx == 18) switch_to_screen(SCREEN_TRANSLATE_MODE);
+                if (selected_idx == 19) switch_to_screen(SCREEN_STEP);
             }
             break;
 
@@ -402,6 +405,11 @@ static void process_ui_command(ui_cmd_t cmd) {
             translate_mode_screen_handle_cmd(cmd);
             break;
 
+        case SCREEN_STEP:
+            if (cmd == UI_CMD_LEFT) switch_to_screen(SCREEN_MENU);
+            else if (cmd == UI_CMD_CIRCLE) switch_to_screen(SCREEN_MAIN_AR);
+            break;
+
         default:
             break;
     }
@@ -495,6 +503,8 @@ void ui_manager_init(void) {
         ui_translate_lang_screen_init();
         ESP_LOGI(TAG, "初始化翻译模式选择...");
         ui_translate_mode_screen_init();
+        ESP_LOGI(TAG, "初始化计步器...");
+        ui_step_screen_init();
 
         ESP_LOGI(TAG, "加载主屏幕...");
         lv_scr_load(ui_main_screen);

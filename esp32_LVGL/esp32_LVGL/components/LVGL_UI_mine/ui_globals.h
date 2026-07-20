@@ -101,6 +101,7 @@ extern lv_obj_t * ui_call_screen;        // 网络通话界面
 extern lv_obj_t * ui_audio_switch_screen; // 音频切换界面
 extern lv_obj_t * ui_translate_screen;    // 翻译模式界面
 extern lv_obj_t * ui_translate_lang_screen; // 翻译语言选择界面
+extern lv_obj_t * ui_step_screen;         // 计步器界面
 
 // ============================================================
 //   MQTT 数据 / 时钟模块共享变量
