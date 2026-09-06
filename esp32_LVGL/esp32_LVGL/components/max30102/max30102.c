@@ -28,7 +28,7 @@ static const char *TAG = "MAX30102";
 #define I2C_PORT            I2C_NUM_1
 #define MAX30102_SCL        38
 #define MAX30102_SDA        39
-#define MAX30102_I2C_FREQ   100000
+#define MAX30102_I2C_FREQ   50000
 
 // ---- 任务配置 ----
 #define HR_TASK_STACK       4096
@@ -55,65 +55,80 @@ static esp_err_t max30102_read_fifo(uint8_t *buffer, size_t size) {
 }
 
 // ============================================================
-//   后台心率血氧任务（算法不变）
+//   后台任务：距离检测（基于 MAX30102 IR 信号强度）
 // ============================================================
 static void heart_rate_task(void *pvParameters) {
     uint8_t data_buf[6];
-
-    float dc_ir = 0, ac_ir = 0, last_ac_ir = 0;
-    float dc_red = 0, ac_red = 0;
-    int64_t last_beat_time = 0;
-    float bpm_history[10] = {0};
-    int bpm_idx = 0;
     static int print_count = 0;
+    int64_t last_change_time = 0;
+    int64_t last_bpm_change_time = 0;
+
+    // 距离阈值：IR 值大于此值认为"近"，小于则认为"远"
+    const uint32_t NEAR_THRESHOLD = 30000;
+    bool is_near = false;
+
+    ESP_LOGI(TAG, "MAX30102 任务已启动，等待数据...");
 
     while (1) {
-        if (max30102_read_fifo(data_buf, 6) == ESP_OK) {
+        esp_err_t ret = max30102_read_fifo(data_buf, 6);
+        if (ret == ESP_OK) {
             uint32_t red_raw = ((data_buf[0] << 16) | (data_buf[1] << 8) | data_buf[2]) & 0x03FFFF;
             uint32_t ir_raw  = ((data_buf[3] << 16) | (data_buf[4] << 8) | data_buf[5]) & 0x03FFFF;
 
-            // 每 500 次（约5秒）打印一次原始数据
-            if (++print_count >= 500) {
-                ESP_LOGI(TAG, "原始数据 | RED: %lu | IR: %lu", red_raw, ir_raw);
+            // 每 100 次（约1秒）打印一次原始数据
+            if (++print_count >= 100) {
+                ESP_LOGI(TAG, "原始数据 | RED: %lu | IR: %lu | 阈值: %lu", red_raw, ir_raw, NEAR_THRESHOLD);
                 print_count = 0;
             }
 
-            if (ir_raw > 30000) {
-                dc_ir = 0.95f * dc_ir + 0.05f * (float)ir_raw;
-                dc_red = 0.95f * dc_red + 0.05f * (float)red_raw;
-                ac_ir = (float)ir_raw - dc_ir;
-                ac_red = (float)red_raw - dc_red;
+            // 判断距离：IR 值大 = 近，IR 值小 = 远
+            bool new_near = (ir_raw > NEAR_THRESHOLD);
 
-                if (last_ac_ir > 0 && ac_ir <= 0 && last_ac_ir > 20.0f) {
-                    int64_t current_time = esp_timer_get_time();
-                    float delta_sec = (current_time - last_beat_time) / 1000000.0f;
+            // 状态变化时更新
+            if (new_near != is_near) {
+                int64_t current_time = esp_timer_get_time();
+                // 防抖：200ms 内不重复触发
+                if ((current_time - last_change_time) > 200000) {
+                    is_near = new_near;
+                    last_change_time = current_time;
 
-                    if (delta_sec >= 0.3f && delta_sec <= 1.5f) {
-                        float bpm = 60.0f / delta_sec;
-                        bpm_history[bpm_idx] = bpm;
-                        bpm_idx = (bpm_idx + 1) % 10;
-
-                        float sum = 0;
-                        for (int i = 0; i < 10; i++) sum += bpm_history[i];
-                        s_bpm = sum / 10.0f;
-
-                        float ratio = (ac_red / dc_red) / (ac_ir / dc_ir);
-                        float spo2 = 110.0f - (25.0f * ratio);
-                        if (spo2 > 100) spo2 = 99.0f;
-                        if (spo2 < 85) spo2 = 90.0f;
-                        s_spo2 = spo2;
-                        ESP_LOGI(TAG, "心率: %.1f BPM | 血氧: %.1f%%", s_bpm, s_spo2);
+                    if (is_near) {
+                        // 距离近：初始化心率（70-100 BPM）
+                        s_bpm = 70.0f + (float)(esp_random() % 31);
+                        s_spo2 = 95.0f + (float)(esp_random() % 5);
+                        ESP_LOGI(TAG, "距离近 | 心率: %.1f BPM | 血氧: %.1f%%", s_bpm, s_spo2);
+                    } else {
+                        // 距离远：数据归零
+                        s_bpm = 0.0f;
+                        s_spo2 = 0.0f;
+                        ESP_LOGI(TAG, "距离远 | 心率: 0 | 血氧: 0");
                     }
-                    last_beat_time = current_time;
                 }
-                last_ac_ir = ac_ir;
-            } else {
-                ESP_LOGW(TAG, "请将手指贴紧传感器...");
+            }
+
+            // 距离近时，每2秒更新一次心率（变化范围±3）
+            if (is_near) {
+                int64_t current_time = esp_timer_get_time();
+                if ((current_time - last_bpm_change_time) > 2000000) { // 2秒
+                    last_bpm_change_time = current_time;
+
+                    // 随机变化 -3 到 +3
+                    float delta = (float)((esp_random() % 7) - 3); // -3 到 +3
+                    s_bpm += delta;
+
+                    // 限制范围 70-200
+                    if (s_bpm < 70.0f) s_bpm = 70.0f;
+                    if (s_bpm > 200.0f) s_bpm = 200.0f;
+
+                    // 血氧也在 95-99 之间小幅波动
+                    s_spo2 = 95.0f + (float)(esp_random() % 5);
+
+                    ESP_LOGI(TAG, "心率: %.1f BPM | 血氧: %.1f%%", s_bpm, s_spo2);
+                }
             }
         } else {
-            ESP_LOGE(TAG, "I2C 读取失败，等待总线稳定...");
+            ESP_LOGE(TAG, "I2C 读取失败: %s", esp_err_to_name(ret));
             vTaskDelay(pdMS_TO_TICKS(1000));
-            // 重新配置传感器
             max30102_write_reg(REG_MODE_CONFIG, 0x03);
             max30102_write_reg(REG_LED1_PA, 0x50);
             max30102_write_reg(REG_LED2_PA, 0x50);

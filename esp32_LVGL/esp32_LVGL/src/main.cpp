@@ -61,7 +61,7 @@ LV_FONT_DECLARE(my_font_cn_16);
 #define I2C_MASTER_SCL_IO           1
 #define I2C_MASTER_SDA_IO           2
 #define I2C_MASTER_NUM              I2C_NUM_0
-#define I2C_MASTER_FREQ_HZ          100000
+#define I2C_MASTER_FREQ_HZ          50000
 
 static const char *TAG = "MAIN";
 
@@ -233,10 +233,6 @@ static void sensor_mqtt_task(void *arg) {
             ESP_LOGI("SENSOR", "温度: %.1f C", temp);
         }
 
-        // 编码器
-        int32_t enc_count = encoder_get_count();
-        ESP_LOGI("ENCODER", "计数: %d", enc_count);
-
         // 步数
         extern uint32_t step_count;
         ESP_LOGI("STEP", "当前步数: %lu", step_count);
@@ -253,36 +249,6 @@ static void sensor_mqtt_task(void *arg) {
             ESP_LOGI("GPS", "海拔: %.1fm | 速度: %.1fkm/h", gps.altitude, gps.speed_kmh);
         } else {
             ESP_LOGI("GPS", "等待定位...");
-        }
-    }
-}
-
-// 编码器扫描任务（每200ms读取，大于2上滑，小于-2下滑）
-static void encoder_scan_task(void *arg) {
-    extern int32_t encoder_get_count(void);
-    extern void encoder_reset(void);
-
-    while (1) {
-        vTaskDelay(pdMS_TO_TICKS(200));
-
-        int32_t count = encoder_get_count();
-        encoder_reset();
-
-        // 大于2判定为上滑，小于-2判定为下滑
-        if (count > 2) {
-            ESP_LOGI("ENCODER", "上滑 (count=%d)", count);
-            motor_pulse_short(); // 编码器旋转震动反馈
-            if (ui_cmd_queue != NULL) {
-                ui_cmd_t cmd = UI_CMD_UP;
-                xQueueSend(ui_cmd_queue, &cmd, 0);
-            }
-        } else if (count < -2) {
-            ESP_LOGI("ENCODER", "下滑 (count=%d)", count);
-            motor_pulse_short(); // 编码器旋转震动反馈
-            if (ui_cmd_queue != NULL) {
-                ui_cmd_t cmd = UI_CMD_DOWN;
-                xQueueSend(ui_cmd_queue, &cmd, 0);
-            }
         }
     }
 }
@@ -381,13 +347,13 @@ void magic_wand_task(void *pvParameters) {
 
                     // 运行模型推理
                     if (interpreter->Invoke() == kTfLiteOk) {
-                        // 7个动作: 0=下 1=上 2=左 3=右 4=左敲 5=右敲 6=无动作
+                        // 7个动作: 0=下 1=上 2=左(敲) 3=右(敲) 4=左敲(滑) 5=右敲(滑) 6=无动作
                         float p_down    = model_output->data.f[0];
                         float p_up      = model_output->data.f[1];
-                        float p_left    = model_output->data.f[2];
-                        float p_right   = model_output->data.f[3];
-                        float p_tap_l   = model_output->data.f[4];
-                        float p_tap_r   = model_output->data.f[5];
+                        float p_tap_l   = model_output->data.f[2];  // 左 = 敲
+                        float p_tap_r   = model_output->data.f[3];  // 右 = 敲
+                        float p_swipe_l = model_output->data.f[4];  // 左敲 = 左滑
+                        float p_swipe_r = model_output->data.f[5];  // 右敲 = 右滑
 
                         ui_cmd_t cmd = UI_CMD_NONE;
 
@@ -396,14 +362,14 @@ void magic_wand_task(void *pvParameters) {
                             ESP_LOGW(TAG, "✨ 魔杖施法: 上滑 (%.0f%%)", p_up*100); cmd = UI_CMD_UP;
                         } else if (p_down > 0.8f) {
                             ESP_LOGW(TAG, "✨ 魔杖施法: 下滑 (%.0f%%)", p_down*100); cmd = UI_CMD_DOWN;
-                        } else if (p_left > 0.8f) {
-                            ESP_LOGW(TAG, "✨ 魔杖施法: 左挥 (%.0f%%)", p_left*100); cmd = UI_CMD_LEFT;
-                        } else if (p_right > 0.8f) {
-                            ESP_LOGW(TAG, "✨ 魔杖施法: 右挥 (%.0f%%)", p_right*100); cmd = UI_CMD_RIGHT;
+                        } else if (p_swipe_l > 0.8f) {
+                            ESP_LOGW(TAG, "✨ 魔杖施法: 左滑 (%.0f%%)", p_swipe_l*100); cmd = UI_CMD_LEFT;
+                        } else if (p_swipe_r > 0.8f) {
+                            ESP_LOGW(TAG, "✨ 魔杖施法: 右滑 (%.0f%%)", p_swipe_r*100); cmd = UI_CMD_RIGHT;
                         } else if (p_tap_l > 0.8f) {
-                            ESP_LOGW(TAG, "✨ 魔杖施法: 左敲 (%.0f%%)", p_tap_l*100); cmd = UI_CMD_CIRCLE;
+                            ESP_LOGW(TAG, "✨ 魔杖施法: 敲击 (%.0f%%)", p_tap_l*100); cmd = UI_CMD_CIRCLE;
                         } else if (p_tap_r > 0.8f) {
-                            ESP_LOGW(TAG, "✨ 魔杖施法: 右敲 (%.0f%%)", p_tap_r*100); cmd = UI_CMD_CIRCLE;
+                            ESP_LOGW(TAG, "✨ 魔杖施法: 敲击 (%.0f%%)", p_tap_r*100); cmd = UI_CMD_CIRCLE;
                         }
 
                         // 如果识别成功，触发震动反馈并发送给 UI 队列
@@ -453,7 +419,6 @@ extern "C" void app_main(void) {
     }
     xTaskCreatePinnedToCore(btn_scan_task, "btn_scan", 4096, NULL, 3, NULL, 0);
     xTaskCreatePinnedToCore(sensor_mqtt_task, "sensor_mqtt", 4096, NULL, 2, NULL, 0);
-    xTaskCreatePinnedToCore(encoder_scan_task, "enc_scan", 4096, NULL, 3, NULL, 0);
 
     my_ble_init("My_Smart_JARVIS");
     ESP_LOGI(TAG, "1. 启动物理屏幕驱动...");
@@ -464,8 +429,6 @@ extern "C" void app_main(void) {
     lvgl_port_init(&lvgl_cfg);
 
     ESP_LOGI(TAG, "3. 将屏幕挂载到 LVGL...");
-    // 先设置镜像，再注册显示驱动
-    ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_handle, true, false));
 
     // 检查 PSRAM 是否可用
     size_t psram_size = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
@@ -481,6 +444,10 @@ extern "C" void app_main(void) {
     disp_cfg.monochrome = false;
     disp_cfg.flags.buff_dma = false;
     lvgl_port_add_disp(&disp_cfg);
+
+    // LVGL 注册显示后重新设置镜像（确保不被覆盖）
+    ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_handle, true, false));
+
     set_default_time(); // 设置默认时间，防止无网时显示 1970 年
 
     ESP_LOGI(TAG, "3.5 初始化 LVGL 扩展库 (SJPG/PNG/BMP 解码器)...");

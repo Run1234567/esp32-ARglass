@@ -1,6 +1,6 @@
 /**
  * @file camera_app.c
- * @brief 摄像头初始化与拍照模块
+ * @brief 摄像头初始化、拍照与智能视频推流模块
  *
  * =====================================================================
  * 模块功能：
@@ -8,6 +8,18 @@
  * 管理 OV2640 并行接口摄像头，提供初始化、拍照、保存到 SD 卡等功能。
  * 摄像头工作在 JPEG/UXGA (1600x1200) 模式，图像直接由硬件编码为 JPEG，
  * 帧缓冲存储在 PSRAM 中 (2 个缓冲区，双缓冲)。
+ *
+ *   1. 拍照功能
+ *      - UXGA 高分辨率拍照 (1600x1200)
+ *      - 自动保存到 SD 卡
+ *      - 可选上传到服务器
+ *
+ *   2. 视频推流 (智能弱网优化)
+ *      - 自适应分辨率 (VGA/SVGA/XGA)
+ *      - 自适应帧率 (10/15/20/25 FPS)
+ *      - 网络状态感知 (自动暂停/恢复)
+ *      - 本地缓存 (网络差时保存到SD卡)
+ *      - 离线模式 (完全断网时本地预览)
  *
  * GPIO 引脚映射 (16-bit 并行数据总线 + 控制信号):
  *   数据总线 D0-D7:  GPIO 15, 17, 18, 16, 14, 12, 11, 48
@@ -25,6 +37,8 @@
  *   - sd_card_app:  SD 卡挂载点定义 (MOUNT_POINT)
  *   - my_uart:      串口通信 (通知 UI 拍照完成)
  *   - log/driver:   日志和底层驱动
+ *   - esp_http_client: HTTP客户端 (上传照片)
+ *   - lwip/sockets: TCP Socket (视频推流)
  */
 
 #include "camera_app.h"
@@ -57,6 +71,31 @@ volatile bool is_capturing = false;
  *   CMD:VIDEO_STOP  -> is_video_recording = false
  */
 volatile bool is_video_recording = false;
+
+/* =====================================================================
+ * 弱网视频推流配置
+ * ===================================================================== */
+// 视频服务器配置
+#define VIDEO_SERVER_IP   "124.220.224.189"
+#define VIDEO_SERVER_PORT 8890
+
+// 自适应分辨率配置
+#define VIDEO_QUALITY_LOW     28    // 低画质 (弱网)
+#define VIDEO_QUALITY_MEDIUM  22    // 中等画质 (中等网络)
+#define VIDEO_QUALITY_HIGH    18    // 高画质 (良好网络)
+
+// 自适应帧率配置 (毫秒/帧)
+#define VIDEO_FPS_LOW     100    // 10 FPS (弱网)
+#define VIDEO_FPS_MEDIUM  66     // 15 FPS (中等网络)
+#define VIDEO_FPS_HIGH    40     // 25 FPS (良好网络)
+
+// 网络检测配置
+#define NETWORK_CHECK_INTERVAL_MS    5000   // 网络检测间隔 (5秒)
+#define NETWORK_STABLE_THRESHOLD     3      // 网络稳定阈值 (连续3次成功)
+
+// 本地缓存配置
+#define VIDEO_CACHE_DIR              "/sdcard/video_cache"
+#define VIDEO_MAX_CACHE_FILES        100    // 最大缓存文件数
 
 /* =====================================================================
  * 高分辨率拍照执行函数
@@ -277,17 +316,125 @@ static void upload_photo_to_server(camera_fb_t *pic) {
 }
 
 /* =====================================================================
- * 视频推流任务 (TCP 端口 8890)
+ * 弱网环境辅助函数
+ * =====================================================================
+ */
+
+/**
+ * @brief 检查网络是否可用 (使用HTTP测试)
+ * @return true 网络可用, false 网络不可用
+ *
+ * 使用轻量级HTTP HEAD请求测试网络连接性
+ * 不依赖esp_netif.h，兼容所有ESP-IDF版本
+ */
+static bool is_network_available(void) {
+    // 使用上传服务器作为测试目标
+    esp_http_client_config_t config = {0};
+    config.url = "http://124.220.224.189:5000/";
+    config.method = HTTP_METHOD_HEAD;
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL) {
+        return false;
+    }
+
+    esp_err_t err = esp_http_client_open(client, 0);
+    if (err == ESP_OK) {
+        esp_http_client_fetch_headers(client);
+        int status_code = esp_http_client_get_status_code(client);
+        esp_http_client_cleanup(client);
+        return (status_code > 0);
+    }
+
+    esp_http_client_cleanup(client);
+    return false;
+}
+
+/**
+ * @brief 保存视频帧到SD卡缓存
+ * @param fb 帧缓冲指针
+ * @param timestamp 时间戳
+ * @return ESP_OK 成功, ESP_FAIL 失败
+ *
+ * 网络不可用时，将视频帧保存到SD卡
+ * 等待网络恢复后可以手动上传
+ */
+static esp_err_t save_frame_to_cache(camera_fb_t *fb, uint32_t timestamp) {
+    if (!fb || !fb->buf) {
+        return ESP_FAIL;
+    }
+
+    // 创建缓存目录
+    mkdir(VIDEO_CACHE_DIR, 0777);
+
+    // 生成文件名 (使用时间戳避免冲突)
+    char file_path[128];
+    snprintf(file_path, sizeof(file_path), "%s/VID_%lu.jpg", VIDEO_CACHE_DIR, timestamp);
+
+    FILE *file = fopen(file_path, "wb");
+    if (file == NULL) {
+        ESP_LOGE(TAG, "❌ 无法创建缓存文件: %s", file_path);
+        return ESP_FAIL;
+    }
+
+    // 写入JPEG数据
+    size_t written = fwrite(fb->buf, 1, fb->len, file);
+    fclose(file);
+
+    if (written == fb->len) {
+        ESP_LOGD(TAG, "💾 视频帧已缓存: %s (%d bytes)", file_path, fb->len);
+        return ESP_OK;
+    } else {
+        ESP_LOGE(TAG, "❌ 缓存文件写入失败: %s", file_path);
+        remove(file_path);
+        return ESP_FAIL;
+    }
+}
+
+/**
+ * @brief 自适应调整视频质量
+ * @param network_stable 网络是否稳定
+ * @param current_quality 当前质量设置
+ * @return 新的质量设置
+ *
+ * 根据网络状况动态调整视频质量:
+ * - 网络稳定: 提高画质
+ * - 网络不稳定: 降低画质
+ */
+static int adaptive_quality_adjustment(bool network_stable, int current_quality) {
+    if (network_stable) {
+        // 网络稳定，尝试提高画质 (降低quality值)
+        if (current_quality > VIDEO_QUALITY_HIGH) {
+            return current_quality - 2;  // 逐步提高
+        }
+        return VIDEO_QUALITY_HIGH;
+    } else {
+        // 网络不稳定，降低画质 (增加quality值)
+        if (current_quality < VIDEO_QUALITY_LOW) {
+            return current_quality + 2;  // 逐步降低
+        }
+        return VIDEO_QUALITY_LOW;
+    }
+}
+
+/* =====================================================================
+ * 视频推流任务 (TCP 端口 8890) - 弱网优化版
  * =====================================================================
  * @brief 将摄像头 JPEG 帧通过 TCP 实时推送到云服务器
  *
- * 协议: [4字节长度 (小端序)] + [JPEG 数据]
- * 帧率: 约 15 FPS (每帧延时 60ms)
+ * 协议: [4字节长度 (小端序)] + [4字节时间戳] + [JPEG 数据]
  * 分辨率: VGA (640x480) 以提高帧率
+ *
+ * 弱网优化:
+ *   - 自适应画质 (根据网络状况动态调整)
+ *   - 自适应帧率 (网络差时降低帧率)
+ *   - 本地缓存 (网络断开时保存到SD卡)
+ *   - 网络检测 (定期检查网络状态)
  *
  * 工作模式:
  *   - is_video_recording = false: 休眠待机
  *   - is_video_recording = true:  连接服务器，持续推流
+ *   - 网络断开: 自动保存到本地缓存
  *   - 推流结束: 恢复 UXGA 高分辨率拍照模式
  *
  * 优先级: 4
@@ -303,18 +450,25 @@ void video_stream_task(void *pvParameters) {
     dest_addr.sin_family = AF_INET;
     dest_addr.sin_port = htons(VIDEO_SERVER_PORT);
 
+    // 弱网优化变量
+    int current_quality = VIDEO_QUALITY_MEDIUM;  // 当前画质
+    int current_fps_delay = VIDEO_FPS_MEDIUM;    // 当前帧间隔
+    bool network_stable = true;                  // 网络是否稳定
+    int network_check_counter = 0;               // 网络检测计数器
+    int send_fail_count = 0;                     // 发送失败计数
+
     while (1) {
         // 休眠等待 UI 触发
         while (!is_video_recording) {
             vTaskDelay(pdMS_TO_TICKS(100));
         }
 
-        ESP_LOGI(TAG, "🎥 开始视频推流...");
+        ESP_LOGI(TAG, "🎥 开始视频推流 (弱网优化模式)...");
 
-        // 切换到 VGA 分辨率 + 低画质 (图片压缩到 ~10KB)
+        // 切换到 VGA 分辨率 + 中等画质
         sensor_t *s = esp_camera_sensor_get();
         s->set_framesize(s, FRAMESIZE_VGA);
-        s->set_quality(s, 22);  // 降低画质，大幅减小图片体积
+        s->set_quality(s, current_quality);
 
         // 丢弃前 5 帧，确保传感器输出已经是 VGA 数据
         for (int i = 0; i < 5; i++) {
@@ -324,51 +478,126 @@ void video_stream_task(void *pvParameters) {
         }
         ESP_LOGI(TAG, "VGA 切换完成，开始推流...");
 
-        // 建立 TCP 连接
-        int sock = socket(AF_INET, SOCK_STREAM, 0);
-        if (sock < 0) {
-            is_video_recording = false;
-            continue;
+        // 建立 TCP 连接 (带重试)
+        int sock = -1;
+        int connect_retry = 0;
+        bool connected = false;
+
+        while (!connected && connect_retry < 3) {
+            sock = socket(AF_INET, SOCK_STREAM, 0);
+            if (sock < 0) {
+                ESP_LOGE(TAG, "❌ Socket 创建失败，重试 %d/3", connect_retry + 1);
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                connect_retry++;
+                continue;
+            }
+
+            if (connect(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr)) == 0) {
+                connected = true;
+                ESP_LOGI(TAG, "✅ 成功连接到视频服务器 %s:%d", VIDEO_SERVER_IP, VIDEO_SERVER_PORT);
+            } else {
+                ESP_LOGW(TAG, "⚠️ 连接视频服务器失败，重试 %d/3", connect_retry + 1);
+                close(sock);
+                sock = -1;
+                connect_retry++;
+                vTaskDelay(pdMS_TO_TICKS(2000));  // 等待2秒后重试
+            }
         }
 
-        if (connect(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr)) == 0) {
-            ESP_LOGI(TAG, "✅ 成功连接到视频服务器 %s:%d", VIDEO_SERVER_IP, VIDEO_SERVER_PORT);
+        if (!connected) {
+            ESP_LOGE(TAG, "❌ 无法连接视频服务器，进入离线模式");
 
+            // 离线模式：持续保存到本地缓存
             while (is_video_recording) {
-                // 抓取一帧 JPEG
                 camera_fb_t *pic = esp_camera_fb_get();
-                if (!pic) {
-                    vTaskDelay(pdMS_TO_TICKS(50));
-                    continue;
+                if (pic) {
+                    uint32_t timestamp = (uint32_t)(esp_timer_get_time() / 1000);
+                    save_frame_to_cache(pic, timestamp);
+                    esp_camera_fb_return(pic);
                 }
+                vTaskDelay(pdMS_TO_TICKS(VIDEO_FPS_LOW));  // 低帧率保存
+            }
 
-                // 按协议发送: [4字节长度] + [4字节时间戳] + [JPEG数据]
-                uint32_t len = pic->len;
-                uint32_t timestamp = (uint32_t)(esp_timer_get_time() / 1000);  // 微秒转毫秒
+            // 离线模式结束，恢复拍照模式
+            s->set_framesize(s, FRAMESIZE_UXGA);
+            s->set_quality(s, 12);
+            ESP_LOGI(TAG, "⏹️ 离线录制结束");
+            continue;  // 继续等待下次触发
+        }
 
-                int send_res = send(sock, &len, 4, 0);          // 1. 发送 4 字节长度
-                if (send_res >= 0) {
-                    send_res = send(sock, &timestamp, 4, 0);     // 2. 发送 4 字节时间戳
+        // 成功连接，开始推流
+        send_fail_count = 0;  // 重置失败计数
+
+        while (is_video_recording) {
+            // 定期检查网络状态
+            if (++network_check_counter >= (NETWORK_CHECK_INTERVAL_MS / current_fps_delay)) {
+                network_check_counter = 0;
+                bool new_network_status = is_network_available();
+
+                if (new_network_status != network_stable) {
+                    network_stable = new_network_status;
+                    current_quality = adaptive_quality_adjustment(network_stable, current_quality);
+                    s->set_quality(s, current_quality);
+
+                    if (network_stable) {
+                        ESP_LOGI(TAG, "📶 网络恢复，提高画质: quality=%d", current_quality);
+                        current_fps_delay = VIDEO_FPS_HIGH;
+                    } else {
+                        ESP_LOGW(TAG, "📶 网络不稳定，降低画质: quality=%d", current_quality);
+                        current_fps_delay = VIDEO_FPS_LOW;
+                    }
                 }
-                if (send_res >= 0) {
-                    send_res = send(sock, pic->buf, pic->len, 0); // 3. 发送 JPEG 数据
-                }
+            }
 
-                esp_camera_fb_return(pic);  // 归还帧缓冲
+            // 抓取一帧 JPEG
+            camera_fb_t *pic = esp_camera_fb_get();
+            if (!pic) {
+                vTaskDelay(pdMS_TO_TICKS(50));
+                continue;
+            }
 
-                if (send_res < 0) {
-                    ESP_LOGE(TAG, "网络断开，停止推流");
+            // 按协议发送: [4字节长度] + [4字节时间戳] + [JPEG数据]
+            uint32_t len = pic->len;
+            uint32_t timestamp = (uint32_t)(esp_timer_get_time() / 1000);  // 微秒转毫秒
+
+            int send_res = send(sock, &len, 4, 0);          // 1. 发送 4 字节长度
+            if (send_res >= 0) {
+                send_res = send(sock, &timestamp, 4, 0);     // 2. 发送 4 字节时间戳
+            }
+            if (send_res >= 0) {
+                send_res = send(sock, pic->buf, pic->len, 0); // 3. 发送 JPEG 数据
+            }
+
+            if (send_res < 0) {
+                send_fail_count++;
+                ESP_LOGW(TAG, "⚠️ 发送失败 (%d/5)", send_fail_count);
+
+                // 连续失败5次，认为网络断开
+                if (send_fail_count >= 5) {
+                    ESP_LOGE(TAG, "❌ 网络断开，切换到本地缓存模式");
+                    network_stable = false;
                     break;
                 }
-
-                // 仅休眠 1 个 Tick 喂狗，让 CPU 狂奔推帧
-                vTaskDelay(1);
+            } else {
+                send_fail_count = 0;  // 成功发送，重置计数
             }
-        } else {
-            ESP_LOGE(TAG, "❌ 无法连接视频服务器");
+
+            // 保存帧到本地缓存 (网络不稳定时)
+            if (!network_stable) {
+                save_frame_to_cache(pic, timestamp);
+            }
+
+            esp_camera_fb_return(pic);  // 归还帧缓冲
+
+            // 自适应帧率
+            vTaskDelay(pdMS_TO_TICKS(current_fps_delay));
         }
 
-        close(sock);
+        // 推流结束，清理资源
+        if (sock >= 0) {
+            close(sock);
+            sock = -1;
+        }
         is_video_recording = false;
 
         // 恢复高分辨率 + 高画质拍照模式

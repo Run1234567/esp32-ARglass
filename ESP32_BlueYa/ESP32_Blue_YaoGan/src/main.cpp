@@ -166,7 +166,7 @@ void joystick_ble_task(void *pvParameters) {
         JoystickState new_state = STATE_CENTER;
 
         // X减小=上, X增大=下, Y减小=右, Y增大=左
-        if (raw_x < 1000) {
+        if (raw_x < 1400) {
             new_state = STATE_UP;
         } else if (raw_x > 3000) {
             new_state = STATE_DOWN;

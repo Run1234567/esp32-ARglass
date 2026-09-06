@@ -69,12 +69,12 @@
 #define PIN_CAM_HREF   7
 #define PIN_CAM_PCLK   13
 
+
 #define TFT_SCK_PIN    20
 #define TFT_MOSI_PIN   19
 #define TFT_CS_PIN     5
 #define TFT_DC_PIN     47
 #define TFT_RST_PIN    14
-// 注意：引脚 1 现在用于摇杆 ADC，不再是背光引脚
 
 #define TFT_WIDTH      128
 #define TFT_HEIGHT     160
@@ -145,6 +145,7 @@ static camera_config_t camera_config = {
     .fb_count     = 1,
     .grab_mode    = CAMERA_GRAB_WHEN_EMPTY
 };
+
 
 // ================= 1. WS2812 LED =================
 static led_strip_handle_t configure_led(void) {

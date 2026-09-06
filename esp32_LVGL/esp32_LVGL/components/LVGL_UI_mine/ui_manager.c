@@ -246,7 +246,10 @@ static void process_ui_command(ui_cmd_t cmd) {
         // ---- 主菜单（支持魔杖 + PAJ7620 手势） ----
         case SCREEN_MENU:
             if (cmd == UI_CMD_UP) {
+                uint16_t before = lv_roller_get_selected(menu_roller);
                 menu_scroll_up();
+                uint16_t after = lv_roller_get_selected(menu_roller);
+                ESP_LOGI("MENU", "上滑: %d -> %d", before, after);
             }
             else if (cmd == UI_CMD_DOWN) {
                 menu_scroll_down();

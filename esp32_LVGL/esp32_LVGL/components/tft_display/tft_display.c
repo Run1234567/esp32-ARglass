@@ -81,6 +81,9 @@ void lcd_init(void)
 
     ESP_LOGI(TAG, "开启屏幕显示...");
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
+
+    // 开启左右镜像（X轴镜像开启，Y轴镜像关闭）
+    ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_handle, true, false));
 }
 
 // 绘制纯色块（主要用于前期测试，LVGL 接管后这个函数基本用不上了）

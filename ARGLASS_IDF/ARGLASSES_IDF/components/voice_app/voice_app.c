@@ -44,9 +44,11 @@
 #include "esp_wn_iface.h"       // WakeNet 接口定义
 #include "esp_wn_models.h"      // WakeNet 模型加载
 #include "esp_afe_sr_iface.h"   // AFE (Audio Front End) 接口
-#include "esp_afe_sr_models.h"  // AFE 模型配置
+#include "esp_afe_sr_models.h"  // AFE 模型配置 (ESP_AFE_SR_HANDLE)
+#include "model_path.h"         // srmodel_list_t, esp_srmodel_init, esp_srmodel_filter
 #include "tts_app.h"            // TTS 语音合成 (tts_speak)
 #include "ai_chat.h"            // AI 语音对话模块
+#include "esp_timer.h"          // 高精度计时器
 
 // 注意：已彻底删除所有 esp_mn_xxx (MultiNet) 的头文件
 // MultiNet 用于语音命令识别，当前版本仅使用唤醒词检测
@@ -58,18 +60,13 @@ static const char *TAG = "VOICE_APP";  // 日志标签
  * ===================================================================== */
 extern RingbufHandle_t sr_ringbuf;  // 语音识别专属环形缓冲区 (在 main.c 中创建)
 
-/**
- * @brief ESP-SR 模型列表初始化函数 (外部声明)
- * @param partition_label SPIFFS 分区标签 ("model")
- * @return 模型列表指针
- */
-extern srmodel_list_t *esp_srmodel_init(const char *partition_label);
+// srmodel_list_t, esp_srmodel_init, esp_srmodel_filter 已在 model_path.h 中声明
 
 /* =====================================================================
  * 全局句柄
  * ===================================================================== */
-static esp_afe_sr_iface_t *afe_handle = NULL;  // AFE 接口句柄
-static esp_afe_sr_data_t *afe_data = NULL;     // AFE 运行时数据
+static const esp_afe_sr_iface_t *afe_handle = NULL;  // AFE 接口句柄 (const 因为 ESP_AFE_SR_HANDLE 是常量)
+static esp_afe_sr_data_t *afe_data = NULL;           // AFE 运行时数据
 
 /* =====================================================================
  * 音频喂入任务 (Feed Task)
@@ -167,7 +164,12 @@ static void feed_audio_task(void *arg) {
  * 核心绑定: Core 0
  */
 static void detect_task(void *arg) {
-    ESP_LOGI(TAG, "🧠 AI 唤醒引擎正在监听 (内存自由模式)...");
+    ESP_LOGI(TAG, "🧠 AI 唤醒引擎正在监听 (双击唤醒模式)...");
+
+    // 双击唤醒状态
+    static int64_t last_wake_time = 0;  // 上次唤醒时间 (微秒)
+    static bool waiting_second = false;  // 是否在等待第二次唤醒
+    const int64_t DOUBLE_TAP_TIMEOUT = 5000000;  // 5秒超时 (微秒)
 
     while (1) {
         // 从 AFE 获取处理结果 (阻塞式)
@@ -176,10 +178,37 @@ static void detect_task(void *arg) {
 
         // 检查是否检测到唤醒词
         if (res->wakeup_state == WAKENET_DETECTED) {
-            ESP_LOGI(TAG, "=================================");
-            ESP_LOGI(TAG, "🚀 [成功] 识别到唤醒词：贾维斯！");
-            ESP_LOGI(TAG, "=================================");
-            tts_speak("贾维斯已就绪，请说出指令。");
+            int64_t now = esp_timer_get_time();  // 获取当前时间 (微秒)
+
+            ESP_LOGI(TAG, "🚀 [唤醒] 识别到唤醒词：贾维斯！");
+
+            if (waiting_second && (now - last_wake_time) < DOUBLE_TAP_TIMEOUT) {
+                // ✅ 5秒内再次唤醒 → 进入 AI 聊天
+                ESP_LOGI(TAG, "=================================");
+                ESP_LOGI(TAG, "🤖 [双击确认] 进入 AI 聊天模式！");
+                ESP_LOGI(TAG, "=================================");
+
+                if (!ai_chat_is_active()) {
+                    ai_chat_start();
+                }
+
+                waiting_second = false;  // 重置状态
+            } else {
+                // 第一次唤醒 → 播放提示音，等待第二次
+                ESP_LOGI(TAG, "⏳ [第一次唤醒] 等待 5 秒内再次唤醒...");
+                tts_speak("我在");
+                last_wake_time = now;
+                waiting_second = true;
+            }
+        }
+
+        // 检查是否超时（5秒内没有第二次唤醒）
+        if (waiting_second) {
+            int64_t now = esp_timer_get_time();
+            if ((now - last_wake_time) >= DOUBLE_TAP_TIMEOUT) {
+                ESP_LOGI(TAG, "⏰ [超时] 未在 5 秒内再次唤醒，取消操作");
+                waiting_second = false;
+            }
         }
     }
 }
@@ -220,21 +249,23 @@ void start_jarvis_brain(void) {
     ESP_LOGI(TAG, "🔍 成功加载唤醒模型: %s", wn_name);
 
     /* ---- 步骤3: 初始化 AFE (音频前端) ---- */
-    // 参数: "M"=麦克风模式, models=模型列表, AFE_TYPE_SR=语音识别, HIGH_PERF=高性能
-    afe_config_t *afe_config = afe_config_init("M", models, AFE_TYPE_SR, AFE_MODE_HIGH_PERF);
-    afe_config->wakenet_model_name = wn_name;  // 指定唤醒词模型
+    // 使用 AFE_CONFIG_DEFAULT() 宏获取默认配置，然后自定义
+    afe_config_t afe_config = AFE_CONFIG_DEFAULT();
+    afe_config.wakenet_model_name = wn_name;     // 指定唤醒词模型
+    afe_config.wakenet_init = true;               // 启用唤醒词检测
+    afe_config.aec_init = false;                  // 禁用 AEC (无回声消除需求)
+    afe_config.se_init = true;                    // 启用语音增强
+    afe_config.vad_init = true;                   // 启用 VAD
+    afe_config.afe_mode = SR_MODE_HIGH_PERF;      // 高性能模式
+    afe_config.memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;  // 优先使用 PSRAM
 
-    // 去掉 MultiNet 后 PSRAM 极度宽裕，使用默认内存分配
-    afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
-
-    // 创建 AFE 句柄和运行时数据
-    afe_handle = (esp_afe_sr_iface_t *)esp_afe_handle_from_config(afe_config);
-    afe_data = afe_handle->create_from_config(afe_config);
+    // 使用全局 AFE SR 句柄 (ESP_AFE_SR_HANDLE)
+    afe_handle = &ESP_AFE_SR_HANDLE;
+    afe_data = afe_handle->create_from_config(&afe_config);
 
     /* ---- 步骤4: 设置唤醒阈值 ---- */
-    // 阈值 0.1 (默认约 0.5)：极低的阈值对各种口音极其友好
-    // 代价是可能有少量误唤醒，但在 AR 眼镜场景下可以接受
-    afe_handle->set_wakenet_threshold(afe_data, 1, 0.1);
+    // 注意: 新版 esp-sr API 不再支持 set_wakenet_threshold
+    // 唤醒阈值在模型训练时已固定，无法在运行时调整
 
     /* ---- 步骤5: 启动 FreeRTOS 任务 ---- */
     // feed_audio_task: 从环形缓冲区读取音频，放大后喂给 AFE
